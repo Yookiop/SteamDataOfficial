@@ -16,6 +16,9 @@ vanuit, zodat je de data in Excel/sheets kunt bekijken zonder dbt Cloud:
     player_history.csv    TIJDLIJN (player_history.jsonl) - 1 regel per
                           meting per appid (last_seen_player_count over de
                           tijd; appid_amount _2, _3, ...; + refresh_count)
+    date.csv              DATE-DIMENSIE - elke dag van --date-start t/m
+                          --date-end (default 2003-01-01 t/m 2026-12-31),
+                          join-key: date_fmt (= release_date_fmt)
 
 De lijstvelden (genres/categories/publishers) worden dus NIET in de
 hoofdtabel geplakt maar genormaliseerd naar losse tabellen, gekoppeld via
@@ -28,6 +31,12 @@ data/player_history.jsonl (fetch_new_game_info.py, de tijdlijn) en schrijft
 daarvan player_history.csv: elke regel is daar een aparte meting, dus een
 appid kan meerdere regels hebben (gesorteerd op appid + meetnummer). Staat de
 tijdlijn er niet, dan wordt alleen player_history.csv overgeslagen.
+
+Games.csv en player_history.csv houden alleen release_date_fmt bij (de
+join-sleutel); de datumdelen (year, month_number, month_label, day_of_week,
+day_of_week_label, day_of_month) staan uitsluitend in date.csv. Je joint
+games.csv/player_history.csv dus op release_date_fmt = date_fmt met
+date.csv en haalt de datumdelen daar vandaan.
 
 Output staat standaard naast de invoer (data/). De bestanden zijn UTF-8 met
 BOM (utf-8-sig), zodat Excel de tekst/valuta-codes goed toont.
@@ -44,6 +53,7 @@ import json
 import os
 import re
 import sys
+from datetime import date, timedelta
 
 MAIN_FIELDS = [
     # kolom            -> pad in het JSON-record
@@ -76,6 +86,25 @@ CHILD_TABLES = [          # bestandsnaam    -> pad in het JSON-record
 # opname uit de master).
 HISTORY_FIELDS = MAIN_FIELDS + [
     ("refresh_count",    ["refresh_count"]),
+]
+
+# Datumdelen voor de date-dimensie (date.csv).
+MONTH_LABELS = ["", "January", "February", "March", "April", "May",
+                "June", "July", "August", "September", "October",
+                "November", "December"]
+# Dag-van-week: ISO-nummering (maandag=1 .. zondag=7); labels lowercase.
+DAY_LABELS = {1: "monday", 2: "tuesday", 3: "wednesday", 4: "thursday",
+              5: "friday", 6: "saturday", 7: "sunday"}
+
+# Kolommen van de date-dimensie (date.csv).
+DATE_TABLE_COLS = [
+    ("date_fmt", None),
+    ("year", None),
+    ("month_number", None),
+    ("month_label", None),
+    ("day_of_month", None),
+    ("day_of_week", None),
+    ("day_of_week_label", None),
 ]
 
 
@@ -137,6 +166,49 @@ def amount_ordinal(row):
     return int(m.group(1)) if m else 0
 
 
+def parse_iso_date(iso_str):
+    """'yyyy-mm-dd' -> date, of None bij leeg/ongeldig."""
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", (iso_str or "").strip())
+    if not m:
+        return None
+    y, mo, d = (int(g) for g in m.groups())
+    try:
+        return date(y, mo, d)
+    except ValueError:
+        return None
+
+
+def date_parts(dt):
+    """Datumdelen voor een date: jaar, maandnummer/-label en dag-van-week
+    (ISO: maandag=1 t/m zondag=7) + label, voor de date-dimensie."""
+    dow = dt.isoweekday()
+    return {
+        "year": dt.year,
+        "month_number": dt.month,
+        "month_label": MONTH_LABELS[dt.month],
+        "day_of_week": dow,
+        "day_of_week_label": DAY_LABELS[dow],
+    }
+
+
+def build_date_rows(start_iso, end_iso):
+    """Elke dag van start t/m eind als dict voor date.csv. Retourneert []
+    als het bereik ongeldig is."""
+    start = parse_iso_date(start_iso)
+    end = parse_iso_date(end_iso)
+    if start is None or end is None or start > end:
+        return []
+    rows = []
+    cur = start
+    while cur <= end:
+        row = date_parts(cur)
+        row["date_fmt"] = cur.isoformat()
+        row["day_of_month"] = cur.day
+        rows.append(row)
+        cur += timedelta(days=1)
+    return rows
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(
         description="games.jsonl omzetten naar CSV-tabel-layout (per appid "
@@ -151,6 +223,10 @@ def main(argv=None):
                    help="invoer-tijdlijn van fetch_new_game_info.py, voor "
                         "player_history.csv (default: "
                         "data/player_history.jsonl)")
+    p.add_argument("--date-start", default="2003-01-01",
+                   help="begin datum voor date.csv (default: 2003-01-01)")
+    p.add_argument("--date-end", default="2026-12-31",
+                   help="eind datum voor date.csv (default: 2026-12-31)")
     args = p.parse_args(argv)
 
     in_path = os.path.abspath(args.input)
@@ -215,6 +291,18 @@ def main(argv=None):
     else:
         print(f"> {hist_path} niet gevonden - player_history.csv "
               "overgeslagen.")
+
+    # Date-dimensie (date.csv): elke dag in het bereik, join-key date_fmt.
+    date_rows = build_date_rows(args.date_start, args.date_end)
+    if date_rows:
+        out = os.path.join(out_dir, "date.csv")
+        n = write_csv(out, date_rows, DATE_TABLE_COLS)
+        print(f"> Date-dimensie geschreven: {out} ({n} regels, "
+              f"{date_rows[0]['date_fmt']} t/m "
+              f"{date_rows[-1]['date_fmt']})")
+    else:
+        print(f"> Ongeldig datumbereik ({args.date_start} t/m "
+              f"{args.date_end}) - geen date.csv.")
 
 
 if __name__ == "__main__":
