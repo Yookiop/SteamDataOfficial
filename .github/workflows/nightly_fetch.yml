@@ -19,14 +19,28 @@
 # variables > Actions) with your Steam Web API key
 # (https://steamcommunity.com/dev/apikey).
 #
-# No cron schedule: trigger this workflow yourself (Actions > "Nightly fetch
-# new game info" > Run workflow, also from your phone). Every run lasts up
-# to ~6 hours and resumes from the last checkpoint.
+# No active cron schedule by default: trigger this workflow yourself
+# (Actions > "Nightly fetch new game info" > Run workflow, also from your
+# phone). A daily 03:00 schedule is ready as a COMMENTED-OUT block in the
+# `on:` section below - just remove the '#' lines to activate it. Every run
+# lasts up to ~6 hours and resumes from the last checkpoint.
 
 name: Nightly fetch new game info
 
 on:
   workflow_dispatch: # manual only, via the Actions tab
+  # --- OPTIONEEL dagelijks schema (03:00) --------------------------
+  # Activeer door de '#' voor de 2 regels hieronder te verwijderen
+  # (dus 'schedule:' en '- cron: "0 3 * * *"') en te pushen naar de
+  # DEFAULT branch (main). Let op:
+  #  - GitHub Actions draait cron in UTC: 03:00 UTC = 05:00 NL
+  #    zomertijd (CEST) / 04:00 NL wintertijd (CET).
+  #  - Een schedule draait alleen als het workflow-bestand op de
+  #    default branch staat (niet op een feature branch).
+  #  - GitHub kan scheduled runs overslaan na ~60 dagen zonder push
+  #    in de repo (inactiviteitslimiet voor cron).
+  # schedule:
+  #   - cron: "0 3 * * *"
 
 permissions:
   contents: write # needed to push the data back

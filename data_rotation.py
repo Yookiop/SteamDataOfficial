@@ -130,10 +130,14 @@ class RotatingAppend:
     deel zodra het huidige deel de grens zou overschrijden.
 
     Een deel dat de grens bereikt wordt 'gelockt': er wordt nooit meer
-    naar teruggeschreven. Een nieuwe run opent het HOOGSTE bestaande
-    deel (append) en roteert vandaar verder wanneer nodig - een deel dat
-    aan het einde van de vorige run net de grens had bereikt, wordt dus
-    bij de eerste nieuwe regel vanzelf gerouleerd.
+    naar teruggeschreven. Een nieuwe run kiest het LAAAGSTE deel dat nog
+    ruimte heeft (eerst de basis zonder cijfer, pas daarna _2, _3, ...)
+    en roteert vandaar verder wanneer nodig. Een deel dat aan het einde
+    van de vorige run net de grens had bereikt, wordt dus overgeslagen
+    en de volgende regel gaat naar het volgende deel. Let op: bestaande
+    (lege) deelbestanden op hogere nummers - bv. per ongeluk gecommit of
+    door een git-restore aangemaakt - mogen er NOOIT voor zorgen dat de
+    basis wordt overgeslagen; er wordt altijd in deelvolgorde gevuld.
     """
 
     def __init__(self, base_path, rotate_bytes=ROTATE_BYTES,
@@ -142,8 +146,32 @@ class RotatingAppend:
         self.rotate_bytes = rotate_bytes
         self.max_parts = max_parts
         self.log = log if log is not None else (lambda msg: None)
-        parts = existing_parts(self.base_path)
-        self.index = parts[-1][0] if parts else 1
+        # Kies het LAAAGSTE deel dat nog ruimte heeft (grootte < de
+        # grens) om verder te schrijven. Delen worden in volgorde gevuld:
+        # eerst de basis (zonder cijfer), en pas als díe ~90 MB haalt
+        # volgt _2, dan _3, enz. Een deel is 'gelockt' zodra het vol is.
+        # Bestaande deelbestanden op hogere nummers (bv. lege
+        # placeholder-bestanden die per ongeluk gecommit zijn) worden
+        # daarbij overgeslagen - de basis wordt dus altijd als eerste
+        # gevuld, nooit "random" een hoog genummerd deel.
+        part_paths = dict(existing_parts(self.base_path))
+        self.index = 1
+        while self.index <= max_parts:
+            path = part_paths.get(self.index)
+            if path is None:
+                break                # deel bestaat nog niet -> hier beginnen
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            if size < rotate_bytes:
+                break                # heeft nog ruimte -> hier verder schrijven
+            self.index += 1          # deel is vol (gelockt) -> volgende
+        if self.index > max_parts:
+            raise RotationError(
+                f"! Dataset {self.base_path} heeft al {self.max_parts} "
+                "delen van ~90 MB (de limiet). Verwijder oude delen of "
+                "verhoog MAX_PARTS in data_rotation.py.")
         d = os.path.dirname(self.base_path)
         if d:
             os.makedirs(d, exist_ok=True)
