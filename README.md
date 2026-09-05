@@ -81,7 +81,10 @@ De **basis** (`games.jsonl`/`games.csv`) heeft géén `appid_amount` — elke
 appid komt er maar 1× in voor. De doorlopende per-game nummering
 (`appid_amount` = `<appid>_1`, `_2`, `_3`, ...) leeft uitsluitend in
 `games_extra_info.jsonl`/`.csv` (was `player_history`), waar elke regel een
-aparte momentopname per game is. De review-velden in de **basis** zijn de
+aparte momentopname per game is (elke regel heeft ook `DataUpdatedAt` — de
+datumtijd waarop die momentopname is geschreven, in **UTC** — handig voor
+het verloop van spelersaantallen/reviews over de tijd). De review-velden in
+de **basis** zijn de
 **laatst bekende** waarden per game (1 record per game), automatisch
 gesynct uit de momentopnamen bij elke `fetch_new_game_info.py`-run.
 
@@ -135,12 +138,38 @@ Elke run voegt per game één momentopname toe aan `games_extra_info.jsonl`
 (genummerd `_1`, `_2`, ... per game). Alleen de standaardbibliotheek — geen
 extra packages, geen venv.
 
+### 3) GitHub Actions (optioneel): de `RUN_STATUS`-marker
+
+`.github/workflows/nightly_fetch.yml` doet hetzelfde automatisch op GitHub:
+eerst de bulk (`fetch_games_initial.py`, max 5 uur per run), en alleen als
+de catalogus daarna compleet is ook de extra info. Om nooit keihard te
+worden afgekapt krijgt het script een duurbudget mee
+(`--max-duration-minutes`, gelijk aan de step-timeout) en stopt het zelf
+**~5 minuten eerder, netjes afgerond** (laatste records weggeschreven,
+exit 0).
+
+Als allerlaatste regel print `fetch_games_initial.py` daarom de status
+`RUN_STATUS=...`:
+
+- `RUN_STATUS=complete` — alle 'nieuwe' appids van deze run zijn verwerkt
+  (basis in sync met de API-lijst van dit moment; óók als er niets nieuws
+  was).
+- `RUN_STATUS=partial` — netjes vroegtijdig gestopt (duurbudget, `--limit`,
+  Ctrl+C); er zijn nog 'nieuwe' appids over.
+
+De workflow leest die regel uit de log: alleen bij `complete` draait
+daarna de extra-info-step; bij `partial` doet de job alleen de eindcommit
+en pakt de volgende run de rest op. De status wordt **elke run opnieuw**
+bepaald op basis van wat er nog 'nieuw' is — er wordt niets opgeslagen.
+Komen er later nieuwe games bij via de API, dan is de run waarin ze
+allemaal verwerkt zijn vanzelf weer `complete`.
+
 ## Output (in `data/`)
 
 | Bestand            | Inhoud                                                       |
 | ------------------ | ------------------------------------------------------------ |
 | `games.jsonl`      | basis: 1 JSON-object per regel, alleen games, elke game 1×, **zonder `appid_amount`** — het aantal regels is de voortgang |
-| `games_extra_info.jsonl` | extra info (was `player_history.jsonl`): per run een momentopname per game, doorlopend genummerd per game vanaf `<appid>_1` (`_2`, `_3`, ...) |
+| `games_extra_info.jsonl` | extra info (was `player_history.jsonl`): per run een momentopname per game, doorlopend genummerd per game vanaf `<appid>_1` (`_2`, `_3`, ...), met `DataUpdatedAt` = datumtijd van schrijven (**UTC**) |
 | `blacklist.json`   | appids die niet opnieuw worden geprobeerd (niet-game / geen storepagina / geblokkeerd / handmatig), met reden en datum |
 | `duplicates.jsonl` | dubbele titels, per appid 1×, met `duplicate_of` = behouden appid |
 | `us_region_blocked.json` | games die in de US-store niet te koop zijn maar elders wel (via hun eigen regio opgenomen in `games.jsonl`), met `{name, cc, currency, added}` |
@@ -170,6 +199,51 @@ encoded buiten de repo (zie "Eerste doorgang" hierboven).
 > Wil je een schone lei, verwijder die CSV dan één keer handmatig (de
 > rest van de CSV's mag je gewoon laten staan of zelf verwijderen —
 > `jsonl_to_table.py` bouwt ze toch opnieuw op).
+
+## 🔁 Bestandsrotatie: ~90 MB per deel (2026-09-05)
+
+GitHub blokkeert pushes van bestanden **> 100 MB**. Datasets die blijven
+groeien (de master `games.jsonl` tijdens de bulk, en vooral
+`games_extra_info.jsonl` bij elke extra-info-run) worden daarom in delen
+van maximaal **~90 MB** bewaard via `data_rotation.py`:
+
+- **Naamgeving:** de basis zonder cijfer, daarna `<naam>_2.<ext>`,
+  `<naam>_3.<ext>`, ... t/m `<naam>_5.<ext>` (`MAX_PARTS = 5` — basis +
+  4 rotaties van ~90 MB + de git-historie eroverheen ≈ de GitHub-
+  vuistregel van ~1 GB). Voorbeelden: `games.jsonl` + `games_2.jsonl`;
+  `games_extra_info.jsonl` + `games_extra_info_2.jsonl` ... `_5`.
+- **Locken:** zodra een deel door de volgende regel boven ~90 MB zou
+  komen, wordt het **gelockt** (er komt nooit meer een regel bij) en
+  gaat die regel naar het volgende deel. Een deel dat aan het einde van
+  een run net de grens had bereikt, wordt bij de eerste nieuwe regel van
+  de volgende run vanzelf gerouleerd.
+- **Schrijven:** `fetch_games_initial.py` (`games.jsonl` +
+  `duplicates.jsonl`) en `fetch_new_game_info.py`
+  (`games_extra_info.jsonl`) schrijven via `RotatingAppend`. Volledige
+  herschrijvingen (de master bij `write_master`) verwijderen eerst alle
+  oude delen (`rewrite_rotated`) — er blijven dus nooit verouderde delen
+  staan.
+- **Lezen = samenvoegen:** ál het lezen (diezelfde scripts én
+  `jsonl_to_table.py`) ziet de delen als één dataset (union in volgorde
+  deel 1, 2, 3, ...). Je geeft overal gewoon het **basispad** op; de
+  genummerde delen worden automatisch gevonden. Zo blijft de doorlopende
+  `appid_amount`-nummering per game kloppen over de delen heen, en
+  produceert `jsonl_to_table.py` één samengevoegde `games_extra_info.csv`
+  (en één `games.csv`) — in Power BI is dat dus **één combinatietabel**,
+  geen losse CSV's per deel.
+- **Limiet bereikt?** Als er al `_5` bestaat en nóg een rotatie nodig is,
+  gooit het script een duidelijke fout (`RotationError`) — oude delen
+  verwijderen of `MAX_PARTS`/`ROTATE_BYTES` bovenaan `data_rotation.py`
+  aanpassen.
+- ⚠️ **Dummy-delen (testdata):** `data/games_extra_info.jsonl` + `_2`..`_5`
+  bevatten dummy-momentopnamen (Counter-Strike/Valve-games 10/20/440/570/730,
+  doorlopende nummering) en `data/games.jsonl` + `games_2`..`games_5`
+  bevatten dummy-masterrecords met **fictieve** appids (990000001.., bestaan
+  niet op Steam — de echte bulk-run slaat er dus nooit een echte game voor
+  over). Ze dienen om de samenvoeglogica te controleren. **Verwijder alle
+  dummy-delen vóór de echte runs**: de extra_info-dummy's tellen anders mee
+  in de doorlopende nummering van die games (`fetch_new_game_info.py`), en de
+  master-dummy's vervuilen anders de master.
 
 ## Hoe de afhandeling werkt: blacklist, duplicates en us_region_blocked
 

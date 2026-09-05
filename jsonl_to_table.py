@@ -39,6 +39,14 @@ is daar een aparte momentopname, dus een appid kan meerdere regels hebben
 (gesorteerd op appid + appid_amount-nummer _1, _2, ...). Staat het
 bestand er niet, dan wordt alleen games_extra_info.csv overgeslagen.
 
+Bestandsrotatie (data_rotation.py): de jsonl-datasets groeien sinds
+2026-09-05 door in delen van max ~90 MB (games.jsonl + games_2.jsonl +
+..., games_extra_info.jsonl + games_extra_info_2.jsonl + ..., t/m _5).
+Dit script voegt AL die delen samen (union in volgorde deel 1, 2, 3, ...)
+- je geeft dus gewoon het basispad op (--input / --extra) en de CSVs
+bevatten de samengevoegde data alsof het één bestand was. In Power BI is
+dat één combinatietabel i.p.v. meerdere losse CSV's.
+
 Games.csv en games_extra_info.csv houden alleen release_date_fmt bij (de
 join-sleutel); de datumdelen (year, month_number, month_label, day_of_week,
 day_of_week_label, day_of_month) staan uitsluitend in date.csv. Je joint
@@ -61,6 +69,10 @@ import os
 import re
 import sys
 from datetime import date, timedelta
+
+# Bestandsrotatie: datasets bestaan uit delen van max ~90 MB
+# (basis + _2 .. _5). all_part_paths/canonical_base voegen delen samen.
+from data_rotation import all_part_paths, canonical_base
 
 MAIN_FIELDS = [
     # kolom            -> pad in het JSON-record
@@ -95,12 +107,14 @@ CHILD_TABLES = [          # bestandsnaam    -> pad in het JSON-record
 ]
 
 # Voor games_extra_info.jsonl (was player_history.jsonl) geldt dezelfde
-# layout als de hoofdtabel, plus appid_amount en refresh_count. Daar is
-# elke regel een aparte momentopname: de doorlopende reeks per game begint
-# bij _1 en loopt op met _2, _3, ... (de basis/master telt niet mee).
+# layout als de hoofdtabel, plus appid_amount, refresh_count en
+# DataUpdatedAt (datumtijd van schrijven). Daar is elke regel een aparte
+# momentopname: de doorlopende reeks per game begint bij _1 en loopt op met
+# _2, _3, ... (de basis/master telt niet mee).
 HISTORY_FIELDS = MAIN_FIELDS + [
     ("appid_amount",       ["appid_amount"]),
     ("refresh_count",      ["refresh_count"]),
+    ("DataUpdatedAt",      ["DataUpdatedAt"]),   # tijdstip van schrijven
 ]
 
 # Datumdelen voor de date-dimensie (date.csv).
@@ -152,6 +166,19 @@ def read_records(path):
             if isinstance(rec, dict):
                 records.append(rec)
     return records, total
+
+
+def read_records_multi(base_path):
+    """Lees een dataset uit ALLE rotatiedelen (basis + <naam>_2 .. _5),
+    in volgorde samengevoegd. Retourneert (records, totaal_aantal_regels,
+    aantal_delen)."""
+    parts = all_part_paths(base_path)
+    records, total = [], 0
+    for path in parts:
+        recs, n = read_records(path)
+        records.extend(recs)
+        total += n
+    return records, total, len(parts)
 
 
 def flatten_rows(records, fields):
@@ -245,16 +272,17 @@ def main(argv=None):
                    help="eind datum voor date.csv (default: 2026-12-31)")
     args = p.parse_args(argv)
 
-    in_path = os.path.abspath(args.input)
-    if not os.path.isfile(in_path):
+    in_path = canonical_base(os.path.abspath(args.input))
+    if not all_part_paths(in_path):
         print(f"! Invoer niet gevonden: {in_path}")
         sys.exit(1)
     out_dir = (os.path.abspath(args.out_dir) if args.out_dir
                else os.path.dirname(in_path))
     os.makedirs(out_dir, exist_ok=True)
 
-    records, total_lines = read_records(in_path)
-    print(f"> {len(records)} records gelezen uit {in_path} "
+    records, total_lines, n_parts = read_records_multi(in_path)
+    delen = f" ({n_parts} delen samengevoegd)" if n_parts > 1 else ""
+    print(f"> {len(records)} records gelezen uit {in_path}{delen} "
           f"({total_lines} regels).")
 
     # Hoofdtabel: 1 rij per appid, gesorteerd op appid.
@@ -287,13 +315,15 @@ def main(argv=None):
             writer.writerows(sorted(child_rows[name]))
         print(f"> {path} ({len(child_rows[name])} regels)")
 
-    # Extra info (games_extra_info.jsonl, geschreven door
+    # Extra info (games_extra_info.jsonl*, geschreven door
     # fetch_new_game_info.py): 1 rij per momentopname (meerdere rijen per
-    # appid: _1, _2, ...). Ontbreekt het bestand, dan wordt alleen
-    # games_extra_info.csv overgeslagen.
-    extra_path = os.path.abspath(args.extra)
-    if os.path.isfile(extra_path):
-        extra_records, _ = read_records(extra_path)
+    # appid: _1, _2, ...). Rotatiedelen (_2 .. _5) worden samengevoegd.
+    # Ontbreken alle delen, dan wordt alleen games_extra_info.csv
+    # overgeslagen.
+    extra_base = canonical_base(os.path.abspath(args.extra))
+    extra_parts = all_part_paths(extra_base)
+    if extra_parts:
+        extra_records, _, extra_n = read_records_multi(extra_base)
         if extra_records:
             extra_rows = flatten_rows(extra_records, HISTORY_FIELDS)
             extra_rows.sort(key=lambda r: (r["appid"] is None,
@@ -301,12 +331,14 @@ def main(argv=None):
                                            amount_ordinal(r)))
             out = os.path.join(out_dir, "games_extra_info.csv")
             n = write_csv(out, extra_rows, HISTORY_FIELDS)
-            print(f"> Extra info geschreven: {out} ({n} regels, "
+            delen = f" uit {extra_n} delen" if extra_n > 1 else ""
+            print(f"> Extra info geschreven: {out} ({n} regels{delen}, "
                   "1 per momentopname per appid)")
         else:
-            print(f"> {extra_path} is leeg - geen games_extra_info.csv.")
+            print(f"> {extra_base} (en delen) zijn leeg - geen "
+                  "games_extra_info.csv.")
     else:
-        print(f"> {extra_path} niet gevonden - games_extra_info.csv "
+        print(f"> {extra_base} niet gevonden - games_extra_info.csv "
               "overgeslagen.")
 
     # Date-dimensie (date.csv): elke dag in het bereik, join-key date_fmt.

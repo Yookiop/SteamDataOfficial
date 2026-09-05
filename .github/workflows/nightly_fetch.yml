@@ -1,34 +1,38 @@
-# Steam-data-run: bulk-catalogus + extra info
+# Steam data run: bulk catalog + extra info
 #
-#  1. fetch_games_initial.py (ZONDER --limit): alle nog onbekende appids uit
-#     de officiele app-lijst verwerken tot games.jsonl compleet is. De job-
-#     limiet is 6 uur, dus deze stap committed en pusht ELKE 5 MINUTEN een
-#     checkpoint (data/). Wordt de job na 6 uur afgebroken, dan staat de
-#     voortgang al op GitHub en pakt een volgende (handmatige) run gewoon
-#     verder op. Zodra alles doorlopen is, is deze stap in een paar minuten
-#     klaar ("geen nieuwe games") en loopt de rest gewoon door.
-#  2. fetch_new_game_info.py --limit 50 --random: extra momentopnamen +
-#     reviews (data/games_extra_info.jsonl + reviews bijwerken games.jsonl).
+#  1. fetch_games_initial.py (no --limit): process every still-unknown appid
+#     from the official app list. The script gets a 330-min time budget and
+#     stops ITSELF ~5 min before that (--max-duration-minutes), rounding off
+#     cleanly (exit 0) instead of being hard-killed. The step timeout of
+#     330 min + continue-on-error is only a safety net. During the run a
+#     checkpoint is committed + pushed EVERY 5 MINUTES, so at most ~5 min of
+#     work is in the final commit; the next manual trigger picks up where it
+#     left off. Once everything has been processed, this step finishes in a
+#     few minutes ("no new games") and only then does step 2 run.
+#  2. fetch_new_game_info.py --limit 25000 --random: extra snapshots +
+#     reviews. Only runs when step 1 really completed the whole catalog
+#     (bulk output complete=true). It also stops itself ~5 min before its
+#     own 30-min timeout (--max-duration-minutes). Afterwards everything is
+#     committed + pushed and the job ends.
 #
-# Vereist: GitHub Secret "STEAM_API_KEY" (repo Settings > Secrets and
-# variables > Actions) met je Steam Web API key
+# Requires the GitHub secret "STEAM_API_KEY" (repo Settings > Secrets and
+# variables > Actions) with your Steam Web API key
 # (https://steamcommunity.com/dev/apikey).
 #
-# Handmatig starten: Actions > "Nightly fetch new game info" > Run workflow.
+# No cron schedule: trigger this workflow yourself (Actions > "Nightly fetch
+# new game info" > Run workflow, also from your phone). Every run lasts up
+# to ~6 hours and resumes from the last checkpoint.
 
 name: Nightly fetch new game info
 
 on:
-  schedule:
-    # Elke nacht 03:00 UTC (= 05:00 NL zomertijd / 04:00 NL wintertijd)
-    - cron: "0 3 * * *"
-  workflow_dispatch: # handmatig starten via de Actions-tab
+  workflow_dispatch: # manual only, via the Actions tab
 
 permissions:
-  contents: write # nodig om de data terug te kunnen pushen
+  contents: write # needed to push the data back
 
-# Zorg dat nooit twee runs tegelijk draaien (bijv. handmatig + gepland);
-# een draaiende run wordt niet afgebroken, een nieuwe wacht.
+# Never run two runs at the same time; a running run is not cancelled, a
+# new one waits.
 concurrency:
   group: nightly-fetch
   cancel-in-progress: false
@@ -36,11 +40,14 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # max. looptijd van een GitHub-hosted job
-    # De API key als job-level env-var: de `secrets`-context mag NIET in een
-    # `if:`-conditie (GitHub-fout "Unrecognized named-value: 'secrets'"),
-    # maar wél in `env`. Via env.STEAM_API_KEY kan de stap tóch
-    # conditioneel draaien. Zonder secret is de waarde leeg -> stap skipped.
+    timeout-minutes: 355 # max runtime of a GitHub-hosted job. Must be ABOVE
+                         # the 355 min of the bulk step so the commit step
+                         # can still run after a step timeout.
+    # API key as job-level env var: the `secrets` context is NOT allowed in
+    # an `if:` condition (GitHub error "Unrecognized named-value:
+    # 'secrets'"), but it IS allowed in `env`. env.STEAM_API_KEY makes the
+    # step conditional anyway; without the secret the value is empty -> the
+    # step is skipped.
     env:
       STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
     steps:
@@ -52,14 +59,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Nieuwe games toevoegen via de keyed Web API (heeft de API key nodig).
-      # ZONDER --limit -> duurt langer dan de job-limiet, dus wordt er elke
-      # 5 minuten een checkpoint gecommit + gepusht (data/). Zo overleeft
-      # een afgebroken run (6u-limiet) en kun je elke checkpoint op GitHub
-      # zien; een herstart pakt op waar de laatste checkpoint stopte. De
-      # live voortgang staat in de Actions-log (heartbeat + logregels).
-      - name: Nieuwe games ophalen (bulk, checkpoints om de 5 min)
+      # Fetch new games via the keyed Web API (needs the API key). The
+      # script gets a 330-min time budget (--max-duration-minutes) and stops
+      # itself ~5 min before that, rounding off cleanly; the step timeout of
+      # 330 min + continue-on-error is only a safety net. A checkpoint is
+      # committed + pushed every 5 minutes. Live progress is in the Actions
+      # log (heartbeat + log lines).
+      - id: bulk
+        name: Fetch new games (bulk, max 5h, checkpoints every 5 min)
         if: ${{ env.STEAM_API_KEY != '' }}
+        timeout-minutes: 330
+        continue-on-error: true
         shell: bash
         run: |
           set -u
@@ -69,39 +79,57 @@ jobs:
           commit_checkpoint() {
             git add data/
             if git diff --cached --quiet; then
-              echo "[$(date -u +'%H:%M:%S')] geen nieuwe wijzigingen"
+              echo "[$(date -u +'%H:%M:%S')] no changes to commit"
             else
               git commit -q -m "data: checkpoint fetch_games_initial (UTC $(date -u +'%Y-%m-%d %H:%M'))"
               if git push -q origin HEAD:main; then
-                echo "[$(date -u +'%H:%M:%S')] checkpoint gecommit + gepusht"
+                echo "[$(date -u +'%H:%M:%S')] checkpoint committed + pushed"
               else
-                echo "[$(date -u +'%H:%M:%S')] push mislukt - volgende checkpoint probeert opnieuw"
+                echo "[$(date -u +'%H:%M:%S')] push failed - the next checkpoint will retry"
               fi
             fi
           }
 
-          echo "> fetch_games_initial.py (zonder --limit) starten in de achtergrond..."
-          python fetch_games_initial.py --key "$STEAM_API_KEY" > fetch.log 2>&1 &
+          echo "> starting fetch_games_initial.py (no --limit, budget 330 min) in the background..."
+          python fetch_games_initial.py --key "$STEAM_API_KEY" --max-duration-minutes 330 > fetch.log 2>&1 &
           PID=$!
 
           while kill -0 "$PID" 2>/dev/null; do
-            sleep 300          # checkpoint om de 5 minuten
+            sleep 330          # checkpoint every 5 minutes
             commit_checkpoint
-            echo "--- laatste regels fetch.log ---"
+            echo "--- last lines of fetch.log ---"
             tail -n 3 fetch.log
           done
           wait "$PID"
           status=$?
           commit_checkpoint
-          echo "> fetch_games_initial.py klaar (exit $status). Laatste regels fetch.log:"
+          echo "> fetch_games_initial.py finished (exit $status). Last lines of fetch.log:"
           tail -n 5 fetch.log
+          # 'complete' only when the script really processed everything; a
+          # run that stopped early on its time budget prints RUN_STATUS=
+          # partial. This gates the extra-info step below.
+          if grep -q "RUN_STATUS=complete" fetch.log; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
           if [ "$status" -ne 0 ]; then
-            echo "! fetch_games_initial.py eindigde met een fout - zie fetch.log hierboven."
+            echo "! fetch_games_initial.py ended with an error - see fetch.log above."
             exit "$status"
           fi
 
-      - name: Extra info per game
-        run: python fetch_new_game_info.py --limit 25000 --random
+      - id: extra
+        name: Extra info per game (max 30 min)
+        # Only runs when the bulk step actually completed the full catalog
+        # (output complete=true); a bulk run that stopped early on its time
+        # budget skips this, so the job just commits and ends. The script
+        # itself stops ~5 min before the 30-min timeout
+        # (--max-duration-minutes). Own timeout + continue-on-error so the
+        # commit step below always runs.
+        if: ${{ steps.bulk.outcome == 'success' && steps.bulk.outputs.complete == 'true' }}
+        timeout-minutes: 30
+        continue-on-error: true
+        run: python fetch_new_game_info.py --limit 25000 --random --max-duration-minutes 30
 
       - name: Commit data changes
         run: |
@@ -109,8 +137,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/
           if git diff --cached --quiet; then
-            echo "Geen wijzigingen in data/ - niets te committen."
+            echo "No changes in data/ - nothing to commit."
           else
-            git commit -m "data: nightly Steam data run (new games + extra info, UTC $(date -u +'%Y-%m-%d %H:%M'))"
+            git commit -m "data: Steam data run (UTC $(date -u +'%Y-%m-%d %H:%M'))"
             git push origin HEAD:main
           fi

@@ -105,6 +105,8 @@ Gebruik:
                                              # encoded bewaard voor volgende runs
     python fetch_games_initial.py --forget-key   # bewaarde key wissen
     python fetch_games_initial.py --limit 500    # max. 500 nieuwe appids deze run
+    python fetch_games_initial.py --max-duration-minutes 300  # netjes stoppen ~5 min vóór
+                                             # de step-timeout (GitHub Action)
     python fetch_games_initial.py --report-only  # alleen progressie tonen in te verwerken games
 
     De API key wordt de eerste keer AUTOMATISCH encoded (XOR+base64) bewaard
@@ -131,6 +133,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+
+# Bestandsrotatie: datasets groeien door in delen van max ~90 MB
+# (games.jsonl, duplicates.jsonl, ...). Al het lezen gaat via iter_lines
+# (delen samengevoegd), schrijven via RotatingAppend/remove_all_parts -
+# zie data_rotation.py.
+from data_rotation import (iter_lines, remove_all_parts, RotatingAppend)
 
 ISTORE_APP_LIST_URL = ("https://api.steampowered.com/IStoreService/"
                        "GetAppList/v1/")
@@ -160,6 +168,11 @@ DEFAULT_DELAY = 0.4            # seconden rust tussen twee store-requests
 DEFAULT_JITTER = 0.1           # extra willekeurige spreiding op de pauze
 DEFAULT_TIMEOUT = 30           # timeout per HTTP-call (sec)
 DEFAULT_RETRIES = 6            # pogingen per appid bij throttling/fouten
+
+# Marge (minuten) die het script aanhoudt vóór het opgegeven duurbudget
+# (--max-duration-minutes): zo stopt de run NETJES vóór de GitHub step-
+# timeout hem keihard zou afkappen (laatste records netjes weggeschreven).
+GRACEFUL_STOP_MARGIN_MINUTES = 5
 
 stop_requested = False
 
@@ -356,14 +369,12 @@ def fetch_app_list(key):
 #  Dataset (bron van de waarheid: games.jsonl zelf)                            #
 # --------------------------------------------------------------------------- #
 def load_existing(path):
-    """Lees de al opgeslagen games uit de JSON-output (jsonl met records of
-    losse appids per regel). Retourneert (appids, titels, titel_appid):
-    bekende appids, bestaande titels (lowercase) en per titel het eerste
-    (laagste) appid."""
+    """Lees de al opgeslagen games uit de JSON-output (games.jsonl*; alle
+    delen samengevoegd, of losse appids per regel). Retourneert (appids,
+    titels, titel_appid): bekende appids, bestaande titels (lowercase) en
+    per titel het eerste (laagste) appid."""
     appids, titles, title_appid = set(), set(), {}
-    if not os.path.isfile(path):
-        return appids, titles, title_appid
-    for line in open(path, encoding="utf-8"):
+    for line in iter_lines(path):
         line = line.strip()
         if not line:
             continue
@@ -391,29 +402,29 @@ def load_existing(path):
 
 
 def load_duplicate_appids(data_dir):
-    """Appids die al in duplicates.jsonl staan (per appid maar 1x bewaren)."""
+    """Appids die al in duplicates.jsonl* staan (per appid maar 1x
+    bewaren; alle delen samengevoegd)."""
     path = os.path.join(data_dir, "duplicates.jsonl")
     known = set()
-    if os.path.isfile(path):
-        for line in open(path, encoding="utf-8"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                known.add(int(json.loads(line).get("appid")))
-            except (TypeError, ValueError):
-                continue
+    for line in iter_lines(path):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            known.add(int(json.loads(line).get("appid")))
+        except (TypeError, ValueError):
+            continue
     return known
 
 
 def append_duplicates(data_dir, records, seen):
-    """Schrijf records weg naar duplicates.jsonl (alleen nieuwe appids).
-    Retourneert hoeveel er nieuw zijn toegevoegd."""
+    """Schrijf records weg naar duplicates.jsonl* (alleen nieuwe appids;
+    rotatie bij ~90 MB). Retourneert hoeveel er nieuw zijn toegevoegd."""
     written = 0
     if not records:
         return written
-    with open(os.path.join(data_dir, "duplicates.jsonl"),
-              "a", encoding="utf-8") as f:
+    writer = RotatingAppend(os.path.join(data_dir, "duplicates.jsonl"))
+    try:
         for r in records:
             try:
                 aid = int(r.get("appid"))
@@ -421,9 +432,11 @@ def append_duplicates(data_dir, records, seen):
                 continue
             if aid in seen:
                 continue
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            writer.write_line(json.dumps(r, ensure_ascii=False))
             seen.add(aid)
             written += 1
+    finally:
+        writer.close()
     return written
 
 
@@ -503,25 +516,24 @@ def us_blocked_add(blocked, aid, name, cc, currency):
 
 
 def check_non_usd_tracking(master_path, us_blocked):
-    """Startcontrole: elk games.jsonl-record met een prijs in een NIET-USD-
-    valuta moet in us_region_blocked.json staan (dat is de enige manier
-    waarop zo'n record ontstaat). Waarschuwt ook over tracking-entries die
-    niet (meer) in de master staan."""
+    """Startcontrole: elk games.jsonl*-record (alle delen samengevoegd)
+    met een prijs in een NIET-USD-valuta moet in us_region_blocked.json
+    staan (dat is de enige manier waarop zo'n record ontstaat). Waarschuwt
+    ook over tracking-entries die niet (meer) in de master staan."""
     untracked, known = [], set()
-    if os.path.isfile(master_path):
-        for line in open(master_path, encoding="utf-8"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                r = json.loads(line)
-                aid = int(r.get("appid"))
-            except (TypeError, ValueError):
-                continue
-            known.add(aid)
-            cur = (r.get("price_overview") or {}).get("currency")
-            if cur and cur != "USD" and aid not in us_blocked:
-                untracked.append((aid, r.get("name"), cur))
+    for line in iter_lines(master_path):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+            aid = int(r.get("appid"))
+        except (TypeError, ValueError):
+            continue
+        known.add(aid)
+        cur = (r.get("price_overview") or {}).get("currency")
+        if cur and cur != "USD" and aid not in us_blocked:
+            untracked.append((aid, r.get("name"), cur))
     if untracked:
         print(f"! Waarschuwing: niet-USD-records zonder {US_BLOCKED_FILE}-"
               "tracking:")
@@ -953,6 +965,16 @@ def main(argv=None):
                    help=f"veiligheidslimiet op het aantal store-requests "
                         f"(1 appid per HTTP-call) per run "
                         f"(default: {DEFAULT_MAX_REQUESTS})")
+    p.add_argument("--max-duration-minutes", type=float, default=None,
+                   help="max. aantal minuten dat deze run mag draaien "
+                        "(zet dit gelijk aan de step-timeout in de GitHub "
+                        "Action). Het script stopt zelf NETJES "
+                        f"{GRACEFUL_STOP_MARGIN_MINUTES} minuten vóór die "
+                        "grens: de laatste records worden weggeschreven en "
+                        "blacklist/duplicates/us_region_blocked bewaard, "
+                        "daarna stopt het netjes (exit 0) i.p.v. keihard "
+                        "afgekapt te worden. Zonder deze optie draait het "
+                        "onbeperkt.")
     args = p.parse_args(argv)
 
     data_dir = os.path.abspath(args.data_dir)
@@ -1021,15 +1043,18 @@ def main(argv=None):
     if args.reset:
         # Opnieuw beginnen: dataset + output wissen (geen checkpoint meer).
         # us_region_blocked.json hoort erbij: die verwijst naar games die
-        # straks niet meer in de master staan.
-        for name in ("games.jsonl", "blacklist.json", "duplicates.jsonl",
-                     "us_region_blocked.json"):
+        # straks niet meer in de master staan. games.jsonl en
+        # duplicates.jsonl kunnen uit meerdere delen bestaan
+        # (games_2.jsonl, duplicates_2.jsonl, ... na ~90 MB-rotatie) -
+        # remove_all_parts wist basis + delen.
+        if os.path.abspath(out_path) != os.path.join(data_dir, "games.jsonl"):
+            remove_all_parts(out_path)
+        remove_all_parts(os.path.join(data_dir, "games.jsonl"))
+        remove_all_parts(os.path.join(data_dir, "duplicates.jsonl"))
+        for name in ("blacklist.json", US_BLOCKED_FILE):
             path = os.path.join(data_dir, name)
             if os.path.isfile(path):
                 os.remove(path)
-        if os.path.abspath(out_path) != os.path.join(data_dir, "games.jsonl") \
-                and os.path.isfile(out_path):
-            os.remove(out_path)
         print("> Reset: games/blacklist/duplicates/us_region_blocked.json "
               "gewist - begint opnieuw vanaf het begin van de app-lijst")
 
@@ -1104,6 +1129,7 @@ def main(argv=None):
     if not selected:
         print("> Geen nieuwe games: alles uit de API-call staat al in de "
               "output.")
+        print("RUN_STATUS=complete")
         return
 
     stats = {"requests": 0, "added": 0, "duplicate": 0, "dup_saved": 0,
@@ -1111,13 +1137,23 @@ def main(argv=None):
              "us_blocked": 0}
     added_titles = set()          # deze run toegevoegd (voorkomt intra-run dubbels)
 
+    # Duurbudget (--max-duration-minutes): netjes stoppen enkele minuten
+    # vóór de opgegeven grens, zodat de GitHub step-timeout de run niet
+    # keihard afkapt.
+    t0 = time.monotonic()
+    if args.max_duration_minutes:
+        deadline = max(0.0, args.max_duration_minutes
+                       - GRACEFUL_STOP_MARGIN_MINUTES) * 60.0
+    else:
+        deadline = None
+
     n_req = (len(selected) + STORE_BATCH - 1) // STORE_BATCH
     print(f"\n> Storefront-data ophalen voor {len(selected)} nieuwe appids "
           f"(cc=us -> USD; {STORE_BATCH} appid per request -> "
           f"{n_req} requests) ...")
     print("  Druk op Ctrl+C om netjes te stoppen.\n")
 
-    games_file = open(out_path, "a", encoding="utf-8")
+    games_file = RotatingAppend(out_path, log=print)
     processed = 0
 
     def save_new_game(info, aid, note=""):
@@ -1125,8 +1161,7 @@ def main(argv=None):
         in-memory known-sets bij. Gebruikt door de gewone toevoeging én de
         us_region_blocked-toevoeging (via een andere regio/valuta)."""
         title = (info.get("name") or "").strip().lower()
-        games_file.write(json.dumps(info, ensure_ascii=False) + "\n")
-        games_file.flush()
+        games_file.write_line(json.dumps(info, ensure_ascii=False))
         stats["added"] += 1
         known_appids.add(aid)
         known_titles.add(title)
@@ -1139,6 +1174,13 @@ def main(argv=None):
     try:
         for start in range(0, len(selected), STORE_BATCH):
             if stop_requested:
+                break
+            if deadline is not None and (time.monotonic() - t0) >= deadline:
+                print("\n> Tijdsbudget bijna op (limiet "
+                      f"{args.max_duration_minutes:.0f} min, marge "
+                      f"{GRACEFUL_STOP_MARGIN_MINUTES} min) - de run wordt "
+                      "netjes afgerond; draai het script opnieuw voor de "
+                      "rest.")
                 break
             if stats["requests"] >= args.max_requests:
                 print(f"\n> Veiligheidslimiet van {args.max_requests} requests "
@@ -1292,6 +1334,11 @@ def main(argv=None):
     if remaining_new > 0:
         print(f"\n> {remaining_new} appids blijven 'nieuw'; draai het script "
               "opnieuw voor de volgende.")
+    # Machine-leesbare status voor de GitHub Action: 'complete' = alle
+    # appids verwerkt, 'partial' = netjes gestopt vóór alles klaar was
+    # (tijdsbudget/Ctrl+C/limit).
+    print("RUN_STATUS=complete" if remaining_new <= 0
+          else "RUN_STATUS=partial")
 
 
 if __name__ == "__main__":

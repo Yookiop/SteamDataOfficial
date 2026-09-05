@@ -37,6 +37,10 @@ Per game per run (games met de MEESTE spelers eerst, daarna aflopend):
      daarna <appid>_2, _3, ...
   5. refresh_count = 1 op ELKE regel: zo kun je later per game het aantal
      vernieuwingen optellen (som van refresh_count per appid).
+  6. DataUpdatedAt = de datumtijd (UTC, yyyy-mm-ddThh:mm:ss+00:00) op het
+     moment dat deze regel wordt weggeschreven: zo zie je later per game
+     wanneer elke momentopname is gemaakt (handig voor het verloop van
+     spelersaantal en reviews over de tijd).
 
 Volgorde (zonder --random): gesorteerd op het LAATST bekende spelersaantal
 per game (eerst de laatste games_extra_info-regel van dat appid, anders de
@@ -59,6 +63,8 @@ Gebruik:
     python fetch_new_game_info.py --random    # elke run een willekeurige selectie appids,
                                               # zodat niet steeds dezelfde top-games worden
                                               # bijgewerkt (combineerbaar met --limit)
+    python fetch_new_game_info.py --max-duration-minutes 30 # netjes stoppen ~5 min vóór
+                                                  # de step-timeout (GitHub Action)
     python fetch_new_game_info.py --sync-reviews  # basis (games.jsonl) bijwerken met de
                                                   # laatst bekende reviews en stoppen
 """
@@ -74,7 +80,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
+
+# Bestandsrotatie: datasets groeien door in delen van max ~90 MB
+# (games.jsonl, games_extra_info.jsonl, ...). Al het lezen gaat via
+# iter_lines (delen samengevoegd), schrijven via RotatingAppend/
+# rewrite_rotated - zie data_rotation.py.
+from data_rotation import (existing_parts, iter_lines, rewrite_rotated,
+                           RotatingAppend)
 
 APP_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
 PLAYER_COUNT_URL = ("https://api.steampowered.com/ISteamUserStats/"
@@ -89,6 +102,11 @@ DEFAULT_JITTER = 0.1
 DEFAULT_TIMEOUT = 30
 DEFAULT_RETRIES = 6
 DEFAULT_MAX_REQUESTS = 10000
+
+# Marge (minuten) die het script aanhoudt vóór het opgegeven duurbudget
+# (--max-duration-minutes): netjes stoppen vóór de GitHub step-timeout de
+# run keihard zou afkappen.
+GRACEFUL_STOP_MARGIN_MINUTES = 5
 
 stop_requested = False
 
@@ -105,7 +123,10 @@ def on_signal(signum, frame):  # pragma: no cover - alleen interactief
 
 
 def now_iso():
-    return datetime.now().isoformat(timespec="seconds")
+    """Huidige datumtijd in UTC (bv. 2026-09-05T18:34:12+00:00). Bewust
+    UTC: lokale runs en de GitHub Action (die in UTC draait) krijgen zo
+    dezelfde tijdsbasis voor DataUpdatedAt."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 # --------------------------------------------------------------------------- #
@@ -361,12 +382,11 @@ def fetch_review_summary(appid, timeout=30):
 #  Master + history lezen                                                     #
 # --------------------------------------------------------------------------- #
 def load_master(path):
-    """Lees de unieke games uit games.jsonl (master). Retourneert een dict
-    {appid: record} (alleen regels met een appid en type == game)."""
+    """Lees de unieke games uit games.jsonl* (master; alle delen
+    samengevoegd). Retourneert een dict {appid: record} (alleen regels met
+    een appid en type == game)."""
     master = {}
-    if not os.path.isfile(path):
-        return master
-    for line in open(path, encoding="utf-8"):
+    for line in iter_lines(path):
         line = line.strip()
         if not line:
             continue
@@ -385,14 +405,13 @@ def load_master(path):
 
 
 def load_extra_info(path):
-    """Lees games_extra_info.jsonl. Retourneert (counts, last_players,
-    latest_reviews): per appid het aantal regels, het laatste bekende
-    spelersaantal én de review-samenvatting van de LAATSTE regel (die
+    """Lees games_extra_info*.jsonl (alle delen samengevoegd, in
+    volgorde). Retourneert (counts, last_players, latest_reviews): per
+    appid het aantal regels, het laatste bekende spelersaantal én de
+    review-samenvatting van de LAATSTE regel over alle delen heen (die
     wint - om games.jsonl bij te werken met de laatst bekende data)."""
     counts, last_players, latest_reviews = {}, {}, {}
-    if not os.path.isfile(path):
-        return counts, last_players, latest_reviews
-    for line in open(path, encoding="utf-8"):
+    for line in iter_lines(path):
         line = line.strip()
         if not line:
             continue
@@ -427,10 +446,13 @@ def apply_latest_reviews(master, latest_reviews):
 
 
 def write_master(path, master):
-    """Schrijf de master (dict, volgorde bewaard) terug naar games.jsonl."""
-    with open(path, "w", encoding="utf-8") as f:
-        for rec in master.values():
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    """Schrijf de master (dict, volgorde bewaard) terug naar games.jsonl*.
+    Volledige herschrijving mét rotatie: oude delen worden eerst verwijderd
+    en bij >90 MB gaat het verder in games_2.jsonl enz. (rewrite_rotated)."""
+    rewrite_rotated(
+        path,
+        (json.dumps(rec, ensure_ascii=False) + "\n"
+         for rec in master.values()))
 
 
 # --------------------------------------------------------------------------- #
@@ -479,6 +501,15 @@ def main(argv=None):
     p.add_argument("--max-requests", type=int, default=DEFAULT_MAX_REQUESTS,
                    help=f"veiligheidslimiet op het aantal requests per run "
                         f"(default: {DEFAULT_MAX_REQUESTS})")
+    p.add_argument("--max-duration-minutes", type=float, default=None,
+                   help="max. aantal minuten dat deze run mag draaien "
+                        "(zet dit gelijk aan de step-timeout in de GitHub "
+                        "Action). Het script stopt zelf NETJES "
+                        f"{GRACEFUL_STOP_MARGIN_MINUTES} minuten vóór die "
+                        "grens en rondt netjes af (laatste momentopnamen "
+                        "weggeschreven + basis-reviews bijgewerkt), i.p.v. "
+                        "keihard afgekapt te worden. Zonder deze optie "
+                        "draait het onbeperkt.")
     args = p.parse_args(argv)
 
     data_dir = os.path.abspath(args.data_dir)
@@ -532,7 +563,9 @@ def main(argv=None):
 
     print("\n=== SteamDataOfficial: extra info per game ===")
     print(f"Games in de master          : {len(master)}")
-    print(f"Al in games_extra_info.jsonl: "
+    n_parts = len(existing_parts(extra_path))
+    print(f"Al in games_extra_info*.jsonl ({n_parts} deel"
+          + ("en" if n_parts != 1 else "") + "): "
           f"{sum(extra_counts.values())} regels")
     if args.random:
         print("Volgorde                    : willekeurig (--random)")
@@ -562,11 +595,30 @@ def main(argv=None):
     master_dirty = apply_latest_reviews(master, latest_reviews) > 0
     stats = {"requests": 0, "added": 0, "skipped": 0}
     os.makedirs(data_dir, exist_ok=True)
-    extra_file = open(extra_path, "a", encoding="utf-8")
+    # Schrijven met rotatie: bij ~90 MB wordt het deel gelockt en gaat de
+    # rest naar games_extra_info_2.jsonl, _3.jsonl, ... (max _5).
+    extra_file = RotatingAppend(extra_path, log=print)
     processed = 0
+
+    # Duurbudget (--max-duration-minutes): netjes stoppen enkele minuten
+    # vóór de opgegeven grens, zodat de GitHub step-timeout de run niet
+    # keihard afkapt.
+    t0 = time.monotonic()
+    if args.max_duration_minutes:
+        deadline = max(0.0, args.max_duration_minutes
+                       - GRACEFUL_STOP_MARGIN_MINUTES) * 60.0
+    else:
+        deadline = None
     try:
         for aid in selected:
             if stop_requested:
+                break
+            if deadline is not None and (time.monotonic() - t0) >= deadline:
+                print("\n> Tijdsbudget bijna op (limiet "
+                      f"{args.max_duration_minutes:.0f} min, marge "
+                      f"{GRACEFUL_STOP_MARGIN_MINUTES} min) - de run wordt "
+                      "netjes afgerond; draai het script opnieuw voor de "
+                      "rest.")
                 break
             if stats["requests"] >= args.max_requests:
                 print(f"\n> Veiligheidslimiet van {args.max_requests} requests "
@@ -597,9 +649,11 @@ def main(argv=None):
                     record[key] = (rev or {}).get(key)
                 record["appid_amount"] = next_amount(aid)
                 record["refresh_count"] = 1   # elke extra-info-regel = 1 vernieuwing
-                extra_file.write(
-                    json.dumps(record, ensure_ascii=False) + "\n")
-                extra_file.flush()
+                # Tijdstip van schrijven: zo zie je later per game wanneer
+                # elke momentopname is gemaakt (verloop over de tijd).
+                record["DataUpdatedAt"] = now_iso()
+                extra_file.write_line(
+                    json.dumps(record, ensure_ascii=False))
                 stats["added"] += 1
                 if rev is not None:
                     # Dit is nu de laatst bekende review-samenvatting -> ook
