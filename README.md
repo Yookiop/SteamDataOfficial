@@ -153,6 +153,24 @@ extra packages, geen venv.
 data wordt mee gecommit. Daarom staat de API key er ook niet in: die leeft
 encoded buiten de repo (zie "Eerste doorgang" hierboven).
 
+> 🧮 **CSV's zijn afgeleide bestanden (full refresh).** `games.csv`,
+> `game_genres.csv`, `game_categories.csv`, `game_publishers.csv`,
+> `date.csv` en `games_extra_info.csv` worden door `jsonl_to_table.py`
+> **elke run volledig overschreven** op basis van de actuele jsonl-
+> bestanden. Je hoeft ze dus nooit zelf te legen — ook niet na een
+> `--reset` of het leeggooien van de json-data: een verse
+> `jsonl_to_table.py`-run regenereert alles opnieuw (bij een lege
+> `games.jsonl` krijg je `games.csv` met alleen de header, die weer
+> meegroeit zodra je opnieuw ophaalt).
+>
+> ⚠️ **Eén uitzondering:** `games_extra_info.csv` wordt alleen
+> (opnieuw) geschreven als `games_extra_info.jsonl` **bestaat én niet
+> leeg** is. Is die bron leeg of weg terwijl je de CSV eerder wél hebt
+> gegenereerd, dan blijft een **oude** `games_extra_info.csv` staan.
+> Wil je een schone lei, verwijder die CSV dan één keer handmatig (de
+> rest van de CSV's mag je gewoon laten staan of zelf verwijderen —
+> `jsonl_to_table.py` bouwt ze toch opnieuw op).
+
 ## Hoe de afhandeling werkt: blacklist, duplicates en us_region_blocked
 
 `fetch_games_initial.py` verwerkt elke 'nieuwe' appid (uit de officiële
