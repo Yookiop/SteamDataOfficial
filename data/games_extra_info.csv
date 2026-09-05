@@ -1,0 +1,336 @@
+﻿appid,name,type,is_free,price_currency,price_discount_pct,price_initial_fmt,price_final_fmt,release_date_fmt,recommendations,last_seen_players,review_score,review_score_desc,review_positive,review_negative,review_total,appid_amount,refresh_count
+10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2000-11-01,169623,7651,9,Overwhelmingly Positive,254802,6791,261593,10_1,1
+20,Team Fortress Classic,game,False,USD,0,$4.99,$4.99,1999-04-01,7048,21,8,Very Positive,8091,1189,9280,20_1,1
+30,Day of Defeat,game,False,USD,0,$4.99,$4.99,2003-05-01,4475,65,8,Very Positive,6645,724,7369,30_1,1
+40,Deathmatch Classic,game,False,USD,0,$4.99,$4.99,2001-06-01,2451,3,8,Very Positive,2763,556,3319,40_1,1
+50,Half-Life: Opposing Force,game,False,USD,0,$4.99,$4.99,1999-11-01,25387,81,9,Overwhelmingly Positive,27583,1345,28928,50_1,1
+60,Ricochet,game,False,USD,0,$4.99,$4.99,2000-11-01,4550,1,8,Very Positive,5217,1053,6270,60_1,1
+70,Half-Life,game,False,USD,0,$9.99,$9.99,1998-11-19,117120,653,9,Overwhelmingly Positive,158156,5744,163900,70_1,1
+80,Counter-Strike: Condition Zero,game,False,USD,0,$9.99,$9.99,2004-03-01,21420,357,8,Very Positive,25947,2425,28372,80_1,1
+130,Half-Life: Blue Shift,game,False,USD,0,$4.99,$4.99,2001-06-01,18628,42,8,Very Positive,19642,1570,21212,130_1,1
+220,Half-Life 2,game,False,USD,0,$9.99,$9.99,2004-11-16,202408,1588,9,Overwhelmingly Positive,272173,6708,278881,220_1,1
+240,Counter-Strike: Source,game,False,USD,0,$9.99,$9.99,2004-11-01,135327,2285,9,Overwhelmingly Positive,185942,7164,193106,240_1,1
+300,Day of Defeat: Source,game,False,USD,0,$9.99,$9.99,2010-07-12,15985,170,8,Very Positive,21676,1938,23614,300_1,1
+320,Half-Life 2: Deathmatch,game,False,,,,,2004-11-01,10235,103,8,Very Positive,13923,1429,15352,320_1,1
+360,Half-Life Deathmatch: Source,game,False,USD,0,$9.99,$9.99,2006-05-01,4361,13,6,Mostly Positive,4216,1368,5584,360_1,1
+400,Portal,game,False,USD,0,$9.99,$9.99,2007-10-10,173291,508,9,Overwhelmingly Positive,195936,2934,198870,400_1,1
+440,Team Fortress 2,game,True,,,,,2007-10-10,47806,52502,8,Very Positive,1137633,112071,1249704,440_1,1
+500,Left 4 Dead,game,False,USD,0,$9.99,$9.99,2008-11-17,58115,406,9,Overwhelmingly Positive,65605,2460,68065,500_1,1
+550,Left 4 Dead 2,game,False,USD,0,$9.99,$9.99,2009-11-16,814843,16136,9,Overwhelmingly Positive,1030484,26183,1056667,550_1,1
+570,Dota 2,game,True,,,,,2013-07-09,14376,701186,8,Very Positive,2232195,539911,2772106,570_1,1
+620,Portal 2,game,False,USD,0,$9.99,$9.99,2011-04-18,389939,1637,9,Overwhelmingly Positive,460221,6052,466273,620_1,1
+630,Alien Swarm,game,True,,,,,2010-07-19,294,17,8,Very Positive,20499,1118,21617,630_1,1
+730,Counter-Strike 2,game,True,,,,,2012-08-21,5253907,923719,8,Very Positive,8450677,1386758,9837435,730_1,1
+1002,Rag Doll Kung Fu,game,False,USD,0,$0.99,$0.99,2005-10-12,,0,6,Mostly Positive,105,29,134,1002_1,1
+1200,Red Orchestra: Ostfront 41-45,game,False,USD,0,$4.99,$4.99,2006-03-14,1523,3,8,Very Positive,2224,318,2542,1200_1,1
+1250,Killing Floor,game,False,USD,0,$19.99,$19.99,2009-05-14,40069,181,9,Overwhelmingly Positive,65581,3338,68919,1250_1,1
+1300,SiN Episodes: Emergence,game,False,USD,0,$9.99,$9.99,2006-05-10,1118,1,8,Very Positive,1349,157,1506,1300_1,1
+1313,SiN Gold,game,False,USD,0,$9.99,$9.99,2020-03-18,390,1,6,Mostly Positive,389,101,490,1313_1,1
+1500,Darwinia,game,False,USD,0,$11.99,$11.99,2005-12-01,781,2,8,Very Positive,909,224,1133,1500_1,1
+1510,Uplink,game,False,USD,0,$11.99,$11.99,2006-08-23,1769,4,8,Very Positive,2208,229,2437,1510_1,1
+1520,DEFCON,game,False,USD,0,$11.99,$11.99,2006-09-29,3457,5,8,Very Positive,3782,548,4330,1520_1,1
+1530,Multiwinia,game,False,USD,0,$11.99,$11.99,2008-09-19,409,1,8,Very Positive,494,108,602,1530_1,1
+1600,Dangerous Waters,game,False,USD,80,$24.99,$4.99,2006-02-07,353,0,6,Mostly Positive,316,89,405,1600_1,1
+1610,Space Empires IV Deluxe,game,False,USD,80,$19.99,$3.99,2006-02-07,260,8,8,Very Positive,250,41,291,1610_1,1
+1620,Jagged Alliance 2 Gold,game,False,USD,0,$19.99,$19.99,2006-07-06,,0,0,No user reviews,0,0,0,1620_1,1
+1630,Disciples II: Rise of the Elves ,game,False,USD,0,$5.99,$5.99,2006-07-06,1272,55,8,Very Positive,1260,177,1437,1630_1,1
+1640,Disciples II: Gallean's Return,game,False,USD,0,$5.99,$5.99,2006-07-06,1472,39,8,Very Positive,1382,271,1653,1640_1,1
+1670,Iron Warriors: T-72 Tank Command ,game,False,USD,0,$5.99,$5.99,2006-07-26,268,0,5,Mixed,194,105,299,1670_1,1
+1690,Space Empires V,game,False,USD,80,$19.99,$3.99,2006-10-16,422,8,6,Mostly Positive,348,131,479,1690_1,1
+1700,Arx Fatalis,game,False,USD,0,$4.99,$4.99,2007-04-03,2435,13,8,Very Positive,2316,321,2637,1700_1,1
+1900,Earth 2160,game,False,USD,0,$9.99,$9.99,2006-04-01,754,6,6,Mostly Positive,1126,426,1552,1900_1,1
+1930,Two Worlds Epic Edition,game,False,USD,0,$14.99,$14.99,2009-04-30,2627,21,6,Mostly Positive,4589,1332,5921,1930_1,1
+2100,Dark Messiah of Might & Magic,game,False,USD,0,$9.99,$9.99,2006-10-25,9320,27,8,Very Positive,10719,1077,11796,2100_1,1
+2200,Quake III Arena,game,False,USD,0,$14.99,$14.99,2007-08-03,3467,20,9,Overwhelmingly Positive,3933,170,4103,2200_1,1
+2210,Quake 4,game,False,USD,0,$14.99,$14.99,2011-08-04,3106,23,8,Very Positive,3492,494,3986,2210_1,1
+2270,Wolfenstein 3D,game,False,USD,0,$4.99,$4.99,2007-08-03,3760,14,8,Very Positive,4069,288,4357,2270_1,1
+2280,DOOM + DOOM II,game,False,USD,0,$9.99,$9.99,2007-08-03,25406,196,9,Overwhelmingly Positive,28042,980,29022,2280_1,1
+2310,Quake,game,False,USD,0,$9.99,$9.99,2007-08-03,13898,242,9,Overwhelmingly Positive,15762,581,16343,2310_1,1
+2320,Quake II,game,False,USD,0,$9.99,$9.99,2007-08-03,8509,76,9,Overwhelmingly Positive,9905,484,10389,2320_1,1
+2400,The Ship: Murder Party,game,False,USD,0,$9.99,$9.99,2006-07-11,2557,0,8,Very Positive,5092,855,5947,2400_1,1
+2420,The Ship: Single Player,game,False,,,,,2006-11-20,396,0,6,Mostly Positive,677,276,953,2420_1,1
+2450,Bloody Good Time,game,False,USD,0,$4.99,$4.99,2010-10-29,930,1,6,Mostly Positive,863,237,1100,2450_1,1
+2500,Shadowgrounds,game,False,USD,85,$6.99,$1.04,2006-05-08,1233,3,8,Very Positive,1324,300,1624,2500_1,1
+2520,Gumboy - Crazy Adventures™,game,False,USD,80,$4.99,$0.99,2006-12-19,110,0,5,Mixed,67,65,132,2520_1,1
+2540,RIP - Trilogy™,game,False,USD,0,$4.99,$4.99,2007-06-01,249,0,5,Mixed,236,151,387,2540_1,1
+2590,Alpha Prime,game,False,USD,20,$4.99,$3.99,2007-11-07,849,0,5,Mixed,846,679,1525,2590_1,1
+2600,Vampire: The Masquerade - Bloodlines,game,False,USD,50,$19.99,$9.99,2007-03-22,13862,61,8,Very Positive,14496,858,15354,2600_1,1
+2610,GUN™,game,False,USD,67,$19.99,$6.59,2006-10-13,2094,6,8,Very Positive,2077,189,2266,2610_1,1
+2620,Call of Duty® (2003),game,False,USD,50,$19.99,$9.99,2006-10-13,7299,84,8,Very Positive,7392,417,7809,2620_1,1
+2630,Call of Duty® 2,game,False,USD,50,$19.99,$9.99,2006-10-13,9141,201,8,Very Positive,10772,727,11499,2630_1,1
+2640,Call of Duty: United Offensive,game,False,USD,25,$19.99,$14.99,2006-10-13,2256,21,8,Very Positive,2108,317,2425,2640_1,1
+2700,RollerCoaster Tycoon® 3: Platinum,game,False,,,,,2008-03-12,4150,33,8,Very Positive,4820,423,5243,2700_1,1
+2710,Act of War: Direct Action,game,False,USD,0,$2.99,$2.99,2008-03-12,569,7,8,Very Positive,565,59,624,2710_1,1
+2720,ThreadSpace: Hyperbol,game,False,USD,0,$4.99,$4.99,2007-07-12,,1,6,Mostly Positive,37,12,49,2720_1,1
+2800,X2: The Threat,game,False,USD,0,$4.99,$4.99,2006-07-21,442,5,8,Very Positive,441,90,531,2800_1,1
+2810,X3: Reunion,game,False,USD,0,$9.99,$9.99,2006-07-21,592,12,6,Mostly Positive,533,206,739,2810_1,1
+2820,X3: Terran Conflict,game,False,USD,0,$15.99,$15.99,2008-10-16,2089,54,8,Very Positive,2453,417,2870,2820_1,1
+2840,X: Beyond the Frontier,game,False,USD,0,$4.99,$4.99,2010-10-08,294,5,6,Mostly Positive,298,99,397,2840_1,1
+2850,X: Tension,game,False,USD,0,$4.99,$4.99,2010-10-08,104,0,6,Mostly Positive,112,32,144,2850_1,1
+2870,X Rebirth,game,False,USD,0,$29.99,$29.99,2013-11-15,5155,19,5,Mixed,3199,4116,7315,2870_1,1
+2900,688(I) Hunter/Killer,game,False,USD,80,$24.99,$4.99,2006-10-26,217,0,8,Very Positive,187,41,228,2900_1,1
+2910,Fleet Command,game,False,USD,80,$24.99,$4.99,2006-10-26,459,9,8,Very Positive,422,58,480,2910_1,1
+2920,Sub Command,game,False,USD,80,$24.99,$4.99,2006-10-26,136,1,6,Mostly Positive,109,37,146,2920_1,1
+2990,FlatOut 2,game,False,USD,0,$9.99,$9.99,2006-12-21,19414,168,9,Overwhelmingly Positive,21238,898,22136,2990_1,1
+3010,Xpand Rally,game,False,USD,84,$4.99,$0.79,2006-08-24,542,3,8,Very Positive,520,104,624,3010_1,1
+3020,Call of Juarez,game,False,USD,80,$9.99,$1.99,2007-11-08,3714,14,8,Very Positive,3665,890,4555,3020_1,1
+3050,Xpand Rally Xtreme,game,False,USD,84,$4.99,$0.79,2008-10-08,377,0,6,Mostly Positive,335,98,433,3050_1,1
+3130,Men of War: Red Tide,game,False,USD,0,$4.99,$4.99,2009-11-01,763,8,8,Very Positive,778,140,918,3130_1,1
+3170,King's Bounty: Armored Princess,game,False,USD,0,$9.99,$9.99,2009-11-19,1140,132,8,Very Positive,1300,124,1424,3170_1,1
+3230,Genesis Rising,game,False,USD,0,$4.99,$4.99,2007-08-06,132,0,4,Mostly Negative,50,114,164,3230_1,1
+3260,Safecracker: The Ultimate Puzzle Adventure,game,False,USD,0,$4.99,$4.99,2007-08-29,441,0,5,Mixed,373,261,634,3260_1,1
+3270,Painkiller Overdose,game,False,USD,0,$4.99,$4.99,2007-10-30,947,2,6,Mostly Positive,857,348,1205,3270_1,1
+3300,Bejeweled 2 Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,715,33,9,Overwhelmingly Positive,732,38,770,3300_1,1
+3310,Chuzzle Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,1464,62,8,Very Positive,1516,92,1608,3310_1,1
+3320,Insaniquarium Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,6385,46,9,Overwhelmingly Positive,6609,218,6827,3320_1,1
+3330,Zuma Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,6462,764,9,Overwhelmingly Positive,6517,297,6814,3330_1,1
+3340,AstroPop Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,132,2,8,Very Positive,120,24,144,3340_1,1
+3350,Bejeweled Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,319,7,8,Very Positive,294,40,334,3350_1,1
+3360,Big Money! Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,254,6,8,Very Positive,282,13,295,3360_1,1
+3380,Dynomite Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,396,31,8,Very Positive,415,18,433,3380_1,1
+3390,Feeding Frenzy 2 Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,2483,21,9,Overwhelmingly Positive,2684,82,2766,3390_1,1
+3400,Hammer Heads Deluxe,game,False,,,,,2006-08-30,,0,8,Very Positive,58,8,66,3400_1,1
+3410,Heavy Weapon Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,425,1,8,Very Positive,388,60,448,3410_1,1
+3420,Iggle Pop Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,102,2,8,Very Positive,102,8,110,3420_1,1
+3430,Pizza Frenzy Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,249,5,8,Very Positive,263,8,271,3430_1,1
+3450,Typer Shark! Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,440,14,8,Very Positive,409,55,464,3450_1,1
+3460,Talismania Deluxe,game,False,USD,0,$4.99,$4.99,2006-08-30,,0,8,Very Positive,105,3,108,3460_1,1
+3480,Peggle Deluxe,game,False,USD,0,$4.99,$4.99,2007-03-06,12571,139,9,Overwhelmingly Positive,14125,339,14464,3480_1,1
+3483,Peggle Extreme,game,True,,,,,2007-09-11,,5,8,Very Positive,2761,148,2909,3483_1,1
+3490,Venice Deluxe,game,False,,,,,2007-06-25,,0,7,Positive,19,3,22,3490_1,1
+3500,Mystery P.I.™ - The Lottery Ticket,game,False,USD,0,$4.99,$4.99,2007-10-16,,2,8,Very Positive,77,13,90,3500_1,1
+3510,Amazing Adventures The Lost Tomb™,game,False,USD,0,$4.99,$4.99,2007-12-13,,1,8,Very Positive,78,18,96,3510_1,1
+3520,Mystery P.I.™ - The Vegas Heist,game,False,USD,0,$4.99,$4.99,2008-06-05,,1,8,Very Positive,70,12,82,3520_1,1
+3530,Amazing Adventures Around the World,game,False,USD,0,$4.99,$4.99,2009-04-15,121,4,8,Very Positive,107,22,129,3530_1,1
+3540,Peggle™ Nights,game,False,USD,0,$4.99,$4.99,2008-10-15,3016,67,9,Overwhelmingly Positive,3309,114,3423,3540_1,1
+3560,Bejeweled Twist,game,False,USD,0,$4.99,$4.99,2008-11-18,596,11,8,Very Positive,528,108,636,3560_1,1
+3570,Mystery P.I.™ - The New York Fortune,game,False,USD,0,$4.99,$4.99,2009-01-28,,2,8,Very Positive,52,10,62,3570_1,1
+3580,The Wizard's Pen™,game,False,USD,0,$4.99,$4.99,2009-02-18,,0,8,Very Positive,53,11,64,3580_1,1
+3590,Plants vs. Zombies GOTY Edition,game,False,USD,0,$4.99,$4.99,2009-05-05,143222,3487,9,Overwhelmingly Positive,152061,3586,155647,3590_1,1
+3600,Escape Rosecliff Island,game,False,USD,0,$4.99,$4.99,2009-04-15,195,3,6,Mostly Positive,256,93,349,3600_1,1
+3610,Mystery P.I. - Lost in Los Angeles,game,False,USD,0,$4.99,$4.99,2009-07-27,,4,8,Very Positive,56,11,67,3610_1,1
+3620,Zuma's Revenge!,game,False,USD,0,$4.99,$4.99,2009-09-15,3140,211,8,Very Positive,3341,186,3527,3620_1,1
+3700,Sniper Elite,game,False,USD,0,$7.99,$7.99,2009-07-16,3557,22,6,Mostly Positive,3179,1010,4189,3700_1,1
+3710,Judge Dredd: Dredd vs. Death,game,False,USD,0,$7.99,$7.99,2009-03-26,1128,3,8,Very Positive,1127,162,1289,3710_1,1
+3720,Evil Genius,game,False,USD,90,$9.99,$0.99,2009-06-22,3052,27,8,Very Positive,3364,246,3610,3720_1,1
+3730,Aliens versus Predator Classic 2000,game,False,USD,84,$4.99,$0.79,2010-01-15,2504,7,8,Very Positive,2460,359,2819,3730_1,1
+3800,Advent Rising,game,False,USD,0,$9.99,$9.99,2006-09-14,431,0,6,Mostly Positive,456,133,589,3800_1,1
+3810,BloodRayne (Legacy),game,False,,,,,2006-09-14,465,0,6,Mostly Positive,472,131,603,3810_1,1
+3820,BloodRayne 2 (Legacy),game,False,,,,,2006-09-14,359,1,6,Mostly Positive,322,122,444,3820_1,1
+3830,Psychonauts,game,False,USD,0,$9.99,$9.99,2006-10-11,12308,52,8,Very Positive,18295,974,19269,3830_1,1
+3900,Sid Meier's Civilization® IV,game,False,USD,80,$19.99,$3.99,2006-10-25,2778,586,8,Very Positive,3382,277,3659,3900_1,1
+3910,Sid Meier's Civilization® III Complete,game,False,USD,20,$4.99,$3.99,2006-10-25,5706,1340,8,Very Positive,6976,820,7796,3910_1,1
+3920,Sid Meier's Pirates!,game,False,USD,0,$9.99,$9.99,2005-07-11,6186,81,8,Very Positive,7121,419,7540,3920_1,1
+3960,Shattered Union,game,False,USD,0,$4.99,$4.99,2006-10-25,152,0,5,Mixed,90,78,168,3960_1,1
+3980,CivCity: Rome,game,False,USD,0,$9.99,$9.99,2007-04-06,813,9,6,Mostly Positive,677,271,948,3980_1,1
+3990,Civilization IV®: Warlords,game,False,USD,0,$4.99,$4.99,2007-04-06,403,168,8,Very Positive,497,53,550,3990_1,1
+4000,Garry's Mod,game,False,USD,50,$9.99,$4.99,2006-11-29,1090924,24511,9,Overwhelmingly Positive,1223314,39483,1262797,4000_1,1
+4100,Poker Superstars II,game,False,USD,0,$9.99,$9.99,2006-10-05,,1,5,Mixed,10,9,19,4100_1,1
+4230,RACE - The WTCC Game,game,False,USD,0,$39.99,$39.99,2006-11-24,,0,6,Mostly Positive,151,50,201,4230_1,1
+4290,RACE: Caterham Expansion,game,False,USD,0,$3.99,$3.99,2007-06-22,,0,5,Mixed,7,7,14,4290_1,1
+4300,RoboBlitz,game,False,USD,0,$9.99,$9.99,2006-11-07,,0,6,Mostly Positive,73,21,94,4300_1,1
+4420,Silverfall,game,False,USD,85,$4.99,$0.74,2007-03-20,149,1,5,Mixed,99,68,167,4420_1,1
+4460,City Life 2008,game,False,USD,90,$9.99,$0.99,2008-09-29,242,1,8,Very Positive,205,49,254,4460_1,1
+4470,Silverfall: Earth Awakening,game,False,USD,85,$4.99,$0.74,2008-07-18,,1,6,Mostly Positive,77,32,109,4470_1,1
+4520,Full Spectrum Warrior,game,False,USD,0,$9.99,$9.99,2007-07-17,282,1,6,Mostly Positive,245,90,335,4520_1,1
+4530,Full Spectrum Warrior: Ten Hammers,game,False,USD,0,$9.99,$9.99,2007-07-17,211,0,6,Mostly Positive,174,67,241,4530_1,1
+4560,Company of Heroes - Legacy Edition,game,False,USD,0,$36.99,$36.99,2007-07-17,4831,72,8,Very Positive,6801,493,7294,4560_1,1
+4570,"Warhammer 40,000: Dawn of War - Anniversary Edition (Classic)",game,False,USD,0,$14.99,$14.99,2007-08-07,8805,45,8,Very Positive,11291,645,11936,4570_1,1
+4700,Total War: MEDIEVAL II – Definitive Edition,game,False,USD,0,$19.99,$19.99,2006-11-15,27256,3711,9,Overwhelmingly Positive,34800,1585,36385,4700_1,1
+4770,Rome: Total War™ - Alexander,game,False,,,,,2007-08-28,799,13,6,Mostly Positive,706,221,927,4770_1,1
+4800,Heroes of Annihilated Empires,game,False,USD,0,$7.99,$7.99,2006-11-22,583,5,8,Very Positive,677,116,793,4800_1,1
+4850,Cossacks: Back to War,game,False,USD,0,$4.99,$4.99,2010-09-02,2656,184,8,Very Positive,2642,342,2984,4850_1,1
+4870,Cossacks: Art of War,game,False,USD,0,$4.99,$4.99,2011-08-26,330,25,8,Very Positive,311,68,379,4870_1,1
+4880,Cossacks: European Wars,game,False,USD,0,$4.99,$4.99,2011-08-26,537,29,6,Mostly Positive,472,163,635,4880_1,1
+4890,Cossacks II: Battle for Europe,game,False,USD,0,$4.99,$4.99,2011-08-26,1057,51,8,Very Positive,989,235,1224,4890_1,1
+4900,Zen of Sudoku,game,True,,,,,2006-12-14,101,5,8,Very Positive,337,40,377,4900_1,1
+4920,Natural Selection 2,game,False,USD,0,$4.99,$4.99,2012-10-30,8631,32,8,Very Positive,11383,1986,13369,4920_1,1
+6000,STAR WARS™ Republic Commando™,game,False,USD,0,$9.99,$9.99,2009-07-08,14632,16,9,Overwhelmingly Positive,16408,747,17155,6000_1,1
+6010,Indiana Jones® and the Fate of Atlantis™,game,False,USD,0,$5.99,$5.99,2009-07-08,1385,12,8,Very Positive,1457,98,1555,6010_1,1
+6020,STAR WARS™ Jedi Knight - Jedi Academy™,game,False,USD,0,$9.99,$9.99,2009-09-16,11282,43,9,Overwhelmingly Positive,13274,554,13828,6020_1,1
+6030,STAR WARS™ Jedi Knight II - Jedi Outcast™,game,False,USD,0,$9.99,$9.99,2009-09-16,4042,19,8,Very Positive,4510,444,4954,6030_1,1
+6040,The Dig®,game,False,USD,0,$5.99,$5.99,2009-07-08,1154,3,8,Very Positive,1178,104,1282,6040_1,1
+6060,"STAR WARS™ Battlefront II (Classic, 2005)",game,False,USD,0,$9.99,$9.99,2009-07-08,46372,107,8,Very Positive,51336,2933,54269,6060_1,1
+6080,Thrillville®: Off the Rails™,game,False,USD,0,$9.99,$9.99,2009-07-08,813,4,8,Very Positive,871,66,937,6080_1,1
+6100,Eets,game,True,,,,,2006-12-20,,7,6,Mostly Positive,573,149,722,6100_1,1
+6120,Shank,game,False,USD,0,$9.99,$9.99,2010-10-25,3026,4,8,Very Positive,3672,392,4064,6120_1,1
+6200,Ghost Master®,game,False,USD,0,$4.99,$4.99,2006-12-21,1718,2,8,Very Positive,1746,204,1950,6200_1,1
+6210,Vegas: Make It Big™,game,False,USD,0,$4.99,$4.99,2006-12-21,137,0,6,Mostly Positive,122,44,166,6210_1,1
+6220,FlatOut,game,False,USD,0,$7.49,$7.49,2007-02-02,5851,31,8,Very Positive,6066,591,6657,6220_1,1
+6250,Making History: The Calm & the Storm,game,False,USD,0,$3.99,$3.99,2007-03-13,554,2,6,Mostly Positive,500,132,632,6250_1,1
+6270,Ducati World Championship,game,False,USD,0,$3.99,$3.99,2007-09-21,161,0,5,Mixed,93,112,205,6270_1,1
+6300,Dreamfall: The Longest Journey,game,False,USD,0,$19.99,$19.99,2007-01-12,1086,8,8,Very Positive,1043,194,1237,6300_1,1
+6310,The Longest Journey,game,False,USD,0,$9.99,$9.99,2007-05-01,1882,6,8,Very Positive,1950,223,2173,6310_1,1
+6370,Bloodline Champions,game,True,,,,,2011-10-28,,0,8,Very Positive,1485,250,1735,6370_1,1
+6400,Joint Task Force,game,False,USD,0,$7.99,$7.99,2007-03-27,276,4,8,Very Positive,296,40,336,6400_1,1
+6420,Nexus - The Jupiter Incident,game,False,USD,0,$9.99,$9.99,2007-07-03,986,4,8,Very Positive,930,156,1086,6420_1,1
+6510,Lost Planet™: Extreme Condition,game,False,USD,77,$14.99,$3.44,2007-06-26,1874,8,8,Very Positive,1828,417,2245,6510_1,1
+6600,Bullet Candy,game,False,USD,0,$4.99,$4.99,2007-02-14,,0,5,Mixed,43,42,85,6600_1,1
+6800,Commandos: Behind Enemy Lines,game,False,USD,55,$4.99,$2.24,2007-03-15,3506,75,8,Very Positive,3637,399,4036,6800_1,1
+6810,Commandos: Beyond the Call of Duty,game,False,USD,55,$4.99,$2.24,2007-03-15,971,16,8,Very Positive,990,128,1118,6810_1,1
+6830,Commandos 2: Men of Courage,game,False,USD,55,$4.99,$2.24,2007-03-15,2398,34,8,Very Positive,2422,401,2823,6830_1,1
+6840,Commandos 3: Destination Berlin,game,False,USD,55,$4.99,$2.24,2007-03-15,943,5,5,Mixed,709,428,1137,6840_1,1
+6850,Hitman 2: Silent Assassin,game,False,USD,90,$8.99,$0.89,2007-03-15,3736,19,8,Very Positive,4024,871,4895,6850_1,1
+6860,Hitman: Blood Money,game,False,USD,0,$9.99,$9.99,2007-03-15,13612,82,8,Very Positive,15129,954,16083,6860_1,1
+6870,Battlestations: Midway,game,False,USD,0,$6.99,$6.99,2007-03-15,859,3,6,Mostly Positive,759,213,972,6870_1,1
+6880,Just Cause,game,False,USD,0,$6.99,$6.99,2007-03-15,4546,9,5,Mixed,3529,1798,5327,6880_1,1
+6900,Hitman: Codename 47,game,False,USD,90,$7.99,$0.79,2007-03-15,4239,21,6,Mostly Positive,3608,1490,5098,6900_1,1
+6910,Deus Ex: Game of the Year Edition,game,False,USD,0,$6.99,$6.99,2007-03-29,13722,41,8,Very Positive,14823,809,15632,6910_1,1
+6920,Deus Ex: Invisible War,game,False,USD,75,$6.99,$1.74,2007-03-29,2195,2,5,Mixed,1435,1065,2500,6920_1,1
+6980,Thief: Deadly Shadows,game,False,USD,80,$8.99,$1.79,2007-03-29,2345,5,8,Very Positive,2107,499,2606,6980_1,1
+7000,Tomb Raider: Legend,game,False,USD,86,$6.99,$0.97,2007-03-29,5413,42,8,Very Positive,5364,759,6123,7000_1,1
+7010,Project: Snowblind,game,False,USD,0,$5.99,$5.99,2007-03-29,718,1,6,Mostly Positive,584,186,770,7010_1,1
+7020,Rogue Trooper,game,False,USD,75,$9.99,$2.49,2007-03-29,492,0,8,Very Positive,503,29,532,7020_1,1
+7110,Jade Empire™: Special Edition,game,False,USD,0,$14.99,$14.99,2007-02-27,1884,4,6,Mostly Positive,1573,502,2075,7110_1,1
+7200,Trackmania United Forever,game,False,USD,0,$29.99,$29.99,2008-04-16,2485,70,8,Very Positive,2649,147,2796,7200_1,1
+7210,"Runaway, A Road Adventure",game,False,USD,85,$4.99,$0.74,2007-03-14,676,3,6,Mostly Positive,608,181,789,7210_1,1
+7220,"Runaway, The Dream of The Turtle",game,False,USD,85,$4.99,$0.74,2007-03-14,335,2,5,Mixed,215,170,385,7220_1,1
+7260,Loki,game,False,USD,0,$9.99,$9.99,2007-11-05,217,3,5,Mixed,154,82,236,7260_1,1
+7340,Azada,game,False,USD,0,$9.99,$9.99,2010-04-21,,0,6,Mostly Positive,42,11,53,7340_1,1
+7510,X-Blades,game,False,USD,0,$12.99,$12.99,2009-04-30,1036,0,5,Mixed,1984,1239,3223,7510_1,1
+7520,Two Worlds II HD,game,False,USD,0,$24.99,$24.99,2011-02-03,3873,31,5,Mixed,4482,2536,7018,7520_1,1
+7530,Two Worlds II Castle Defense,game,False,USD,0,$9.99,$9.99,2011-06-14,307,12,5,Mixed,456,335,791,7530_1,1
+7600,Sid Meier's Railroads!,game,False,USD,0,$9.99,$9.99,2007-05-04,2624,82,6,Mostly Positive,2464,1008,3472,7600_1,1
+7610,Railroad Tycoon 3,game,False,USD,0,$9.99,$9.99,2007-05-04,1126,38,6,Mostly Positive,979,286,1265,7610_1,1
+7620,Railroad Tycoon II Platinum,game,False,USD,0,$4.99,$4.99,2007-05-04,1340,69,8,Very Positive,1250,144,1394,7620_1,1
+7650,X-COM: Terror From the Deep,game,False,USD,0,$4.99,$4.99,2007-05-04,763,14,8,Very Positive,852,88,940,7650_1,1
+7660,X-COM: Apocalypse,game,False,USD,0,$4.99,$4.99,2008-09-04,844,10,8,Very Positive,845,109,954,7660_1,1
+7670,BioShock™,game,False,USD,0,$19.99,$19.99,2007-08-21,25148,56,8,Very Positive,30239,1937,32176,7670_1,1
+7730,X-COM: Interceptor,game,False,USD,0,$4.99,$4.99,2008-09-04,161,0,5,Mixed,125,101,226,7730_1,1
+7760,X-COM: UFO Defense,game,False,USD,0,$4.99,$4.99,2008-09-04,3201,36,9,Overwhelmingly Positive,3795,199,3994,7760_1,1
+7770,X-COM: Enforcer,game,False,USD,0,$4.99,$4.99,2008-09-04,310,1,5,Mixed,271,200,471,7770_1,1
+7800,Stubbs the Zombie in Rebel Without a Pulse,game,False,USD,0,$19.99,$19.99,2021-03-16,1776,4,8,Very Positive,2289,331,2620,7800_1,1
+7830,Men of War™,game,False,USD,0,$4.99,$4.99,2009-05-06,3314,37,8,Very Positive,3479,389,3868,7830_1,1
+7840,Death Track®: Resurrection,game,False,USD,0,$2.99,$2.99,2009-05-06,110,0,5,Mixed,99,75,174,7840_1,1
+7860,NecroVision,game,False,USD,0,$4.99,$4.99,2009-05-20,1408,1,5,Mixed,1320,633,1953,7860_1,1
+7940,Call of Duty® 4: Modern Warfare® (2007),game,False,USD,50,$19.99,$9.99,2007-11-12,22055,304,8,Very Positive,25393,1716,27109,7940_1,1
+8000,Tomb Raider: Anniversary,game,False,USD,89,$8.99,$0.98,2007-06-05,6626,63,8,Very Positive,6049,1362,7411,8000_1,1
+8080,Kane and Lynch: Dead Men™,game,False,,,,,2007-12-13,2632,2,5,Mixed,2225,1213,3438,8080_1,1
+8100,Conflict: Denied Ops,game,False,USD,0,$5.99,$5.99,2008-02-08,427,0,5,Mixed,256,229,485,8100_1,1
+8140,Tomb Raider: Underworld,game,False,USD,89,$8.99,$0.98,2008-11-21,6151,55,6,Mostly Positive,5281,1618,6899,8140_1,1
+8170,Battlestations Pacific,game,False,,,,,2009-05-12,2274,9,6,Mostly Positive,1875,728,2603,8170_1,1
+8190,Just Cause 2,game,False,USD,0,$14.99,$14.99,2010-03-23,41015,114,8,Very Positive,46710,4878,51588,8190_1,1
+8330,Telltale Texas Hold ‘Em,game,False,USD,0,$0.99,$0.99,2008-06-17,232,1,5,Mixed,265,119,384,8330_1,1
+8400,Geometry Wars: Retro Evolved,game,False,USD,50,$3.99,$1.99,2007-06-18,1016,6,8,Very Positive,1016,97,1113,8400_1,1
+8500,EVE Online,game,True,,,,,2010-12-15,7799,3801,6,Mostly Positive,28929,10500,39429,8500_1,1
+8600,RACE 07,game,False,USD,0,$7.99,$7.99,2007-10-15,1276,11,8,Very Positive,2361,385,2746,8600_1,1
+8780,RACE On,game,False,USD,0,$7.99,$7.99,2009-10-16,,,0,No user reviews,0,0,0,8780_1,1
+8790,GTR 2 FIA GT Racing Game,game,False,USD,0,$7.99,$7.99,2012-12-12,274,1,8,Very Positive,322,28,350,8790_1,1
+8800,Civilization IV: Beyond the Sword,game,False,USD,80,$29.99,$5.99,2007-07-24,3875,1485,9,Overwhelmingly Positive,4879,191,5070,8800_1,1
+8850,BioShock® 2,game,False,USD,0,$19.99,$19.99,2010-02-09,11457,24,8,Very Positive,13276,1694,14970,8850_1,1
+8870,BioShock Infinite,game,False,USD,0,$29.99,$29.99,2013-03-25,109597,378,8,Very Positive,136067,9505,145572,8870_1,1
+8880,Freedom Force,game,False,USD,75,$4.99,$1.24,2009-05-29,441,3,5,Mixed,309,238,547,8880_1,1
+8890,Freedom Force vs. the Third Reich,game,False,USD,75,$4.99,$1.24,2009-05-29,262,0,8,Very Positive,270,45,315,8890_1,1
+8930,Sid Meier's Civilization® V,game,False,USD,75,$29.99,$7.49,2010-09-21,128084,14048,9,Overwhelmingly Positive,201407,9266,210673,8930_1,1
+8970,Axel & Pixel,game,False,USD,0,$4.99,$4.99,2010-10-06,,0,6,Mostly Positive,75,27,102,8970_1,1
+9010,Return to Castle Wolfenstein,game,False,USD,0,$4.99,$4.99,2007-08-03,7997,75,8,Very Positive,8644,664,9308,9010_1,1
+9060,HeXen II,game,False,USD,0,$4.99,$4.99,2007-08-03,580,2,6,Mostly Positive,484,135,619,9060_1,1
+9180,Commander Keen,game,False,USD,0,$4.99,$4.99,2007-08-03,1463,6,8,Very Positive,1472,103,1575,9180_1,1
+9200,RAGE,game,False,USD,0,$9.99,$9.99,2011-10-03,12221,42,6,Mostly Positive,14243,4056,18299,9200_1,1
+9340,Company of Heroes: Opposing Fronts,game,False,USD,0,$19.99,$19.99,2007-09-24,818,34,8,Very Positive,1107,99,1206,9340_1,1
+9350,Supreme Commander,game,False,USD,0,$12.99,$12.99,2011-09-28,2317,58,8,Very Positive,2803,351,3154,9350_1,1
+9420,Supreme Commander: Forged Alliance,game,False,USD,0,$12.99,$12.99,2011-09-28,9899,730,9,Overwhelmingly Positive,13888,471,14359,9420_1,1
+9460,Frontlines™: Fuel of War™,game,False,USD,0,$19.99,$19.99,2008-02-29,870,1,5,Mixed,737,338,1075,9460_1,1
+9480,Saints Row 2,game,False,USD,75,$9.99,$2.49,2009-01-07,12803,143,6,Mostly Positive,16500,5252,21752,9480_1,1
+9500,Gish,game,False,USD,0,$9.99,$9.99,2007-07-20,302,0,5,Mixed,296,208,504,9500_1,1
+9710,Desperados 2: Cooper's Revenge,game,False,USD,0,$9.99,$9.99,2008-03-12,261,2,5,Mixed,160,159,319,9710_1,1
+9730,Tycoon City: New York,game,False,USD,0,$9.99,$9.99,2008-03-12,234,4,5,Mixed,124,165,289,9730_1,1
+9760,Act of War: High Treason,game,False,USD,0,$2.99,$2.99,2008-03-12,484,7,8,Very Positive,439,101,540,9760_1,1
+9800,Death to Spies,game,False,USD,0,$4.99,$4.99,2008-03-12,799,1,6,Mostly Positive,774,246,1020,9800_1,1
+9850,Codename: Panzers - Cold War,game,False,USD,0,$14.99,$14.99,2009-05-06,223,3,5,Mixed,189,96,285,9850_1,1
+9880,Champions Online,game,True,,,,,2011-06-14,198,88,6,Mostly Positive,3093,1286,4379,9880_1,1
+9900,Star Trek Online,game,True,,,,,2012-01-31,947,1021,6,Mostly Positive,16838,4453,21291,9900_1,1
+9940,Blade Kitten,game,False,USD,50,$4.99,$2.49,2014-05-22,908,0,8,Very Positive,904,183,1087,9940_1,1
+9960,Haunted House™ (2010),game,False,USD,0,$5.99,$5.99,2010-09-28,,0,5,Mixed,18,17,35,9960_1,1
+9970,Star Raiders,game,False,USD,0,$9.99,$9.99,2011-05-11,,0,3,Negative,7,31,38,9970_1,1
+9980,The UnderGarden,game,False,USD,0,$6.99,$6.99,2010-11-10,,0,5,Mixed,58,32,90,9980_1,1
+10090,Call of Duty: World at War,game,False,USD,25,$19.99,$14.99,2008-11-18,45696,323,8,Very Positive,49171,4069,53240,10090_1,1
+10100,King's Quest™ Collection,game,False,USD,50,$19.99,$9.99,2009-07-23,329,8,8,Very Positive,350,52,402,10100_1,1
+10110,Space Quest™ Collection,game,False,USD,67,$19.99,$6.59,2009-07-23,332,6,8,Very Positive,355,62,417,10110_1,1
+10120,Aces of the Galaxy™,game,False,USD,67,$9.99,$3.29,2009-07-23,,0,5,Mixed,30,24,54,10120_1,1
+10130,TimeShift™,game,False,USD,50,$19.99,$9.99,2009-07-23,1130,3,6,Mostly Positive,1145,289,1434,10130_1,1
+10140,3D Ultra™ Minigolf Adventures,game,False,USD,67,$9.99,$3.29,2009-07-23,117,0,5,Mixed,94,41,135,10140_1,1
+10150,Prototype™,game,False,USD,70,$19.99,$5.99,2009-06-10,12458,190,8,Very Positive,11410,2774,14184,10150_1,1
+10180,Call of Duty®: Modern Warfare® 2 (2009),game,False,USD,25,$19.99,$14.99,2009-11-11,35667,383,8,Very Positive,56866,4052,60918,10180_1,1
+10220,Postal III,game,False,USD,0,$5.99,$5.99,2012-02-17,4818,8,5,Mixed,2930,3319,6249,10220_1,1
+10230,Dead Mountaineer's Hotel,game,False,USD,0,$7.99,$7.99,2011-10-28,102,0,4,Mostly Negative,43,70,113,10230_1,1
+10240,A Stroke of Fate: Operation Valkyrie,game,False,USD,0,$6.99,$6.99,2011-10-28,,1,5,Mixed,23,13,36,10240_1,1
+10250,PT Boats: Knights of the Sea,game,False,USD,0,$6.99,$6.99,2011-10-28,,0,5,Mixed,21,21,42,10250_1,1
+10260,PT Boats: South Gambit,game,False,USD,0,$6.99,$6.99,2011-10-28,,0,5,Mixed,15,13,28,10260_1,1
+10270,Disciples III: Reincarnation,game,False,USD,60,$9.99,$3.99,2014-02-14,1307,39,6,Mostly Positive,1342,517,1859,10270_1,1
+10460,The Club™,game,False,USD,0,$14.99,$14.99,2008-02-20,155,0,5,Mixed,120,80,200,10460_1,1
+10500,Total War: EMPIRE – Definitive Edition,game,False,USD,0,$19.99,$19.99,2009-03-04,21280,2162,8,Very Positive,34520,3560,38080,10500_1,1
+10520,Beijing 2008™ - The Official Video Game of the Olympic Games,game,False,,,,,2008-08-14,,0,0,6 user reviews,5,1,6,10520_1,1
+10680,Aliens vs. Predator™,game,False,USD,0,$14.99,$14.99,2010-02-16,16206,126,8,Very Positive,19753,1852,21605,10680_1,1
+11020,TrackMania Nations Forever,game,True,,,,,2008-04-16,170,173,8,Very Positive,21998,2387,24385,11020_1,1
+11040,Sherlock Holmes - Nemesis,game,False,USD,0,$9.99,$9.99,2008-08-07,677,4,6,Mostly Positive,550,228,778,11040_1,1
+11050,Dracula: Origin,game,False,USD,0,$9.99,$9.99,2008-08-07,322,1,6,Mostly Positive,283,97,380,11050_1,1
+11130,Sherlock Holmes: The Mystery of the Mummy,game,True,,,,,2009-08-06,,0,4,Mostly Negative,153,388,541,11130_1,1
+11140,Sherlock Holmes: The Awakened (2008),game,False,USD,0,$9.99,$9.99,2009-08-06,766,7,6,Mostly Positive,673,232,905,11140_1,1
+11150,Sherlock Holmes: The Silver Earring,game,False,USD,0,$9.99,$9.99,2009-08-06,703,4,5,Mixed,473,333,806,11150_1,1
+11180,Sherlock Holmes: The Mystery of the Persian Carpet,game,False,USD,0,$9.99,$9.99,,538,0,4,Mostly Negative,244,383,627,11180_1,1
+11190,Sherlock Holmes versus Jack the Ripper,game,False,USD,0,$9.99,$9.99,2009-12-23,1219,6,8,Very Positive,1116,259,1375,11190_1,1
+11200,Shadowgrounds Survivor,game,False,USD,90,$9.99,$0.99,2007-11-14,583,2,5,Mixed,498,312,810,11200_1,1
+11230,Gumboy Tournament,game,False,USD,75,$2.99,$0.74,2008-05-19,305,0,5,Mixed,327,141,468,11230_1,1
+11240,Space Trader: Merchant Marine,game,False,USD,0,$4.99,$4.99,2008-10-23,450,0,5,Mixed,323,319,642,11240_1,1
+11250,Pacific Storm,game,False,USD,0,$7.99,$7.99,2008-06-24,,0,5,Mixed,48,25,73,11250_1,1
+11260,Pacific Storm Allies,game,False,USD,0,$7.99,$7.99,2008-08-18,216,3,5,Mixed,148,91,239,11260_1,1
+11280,Penguins Arena: Sedna's World,game,False,USD,0,$5.99,$5.99,2008-12-18,801,0,8,Very Positive,1254,141,1395,11280_1,1
+11340,Larva Mortus,game,False,USD,0,$4.99,$4.99,2009-03-19,511,0,6,Mostly Positive,565,181,746,11340_1,1
+11370,Nikopol: Secrets of the Immortals,game,False,USD,0,$4.99,$4.99,2009-07-30,264,0,5,Mixed,218,176,394,11370_1,1
+11390,Crash Time 2,game,False,USD,0,$4.99,$4.99,2009-08-27,1171,1,5,Mixed,1436,1045,2481,11390_1,1
+11450,Overlord™,game,False,USD,0,$4.99,$4.99,2007-10-26,5004,35,8,Very Positive,6306,436,6742,11450_1,1
+11550,Second Sight,game,False,USD,0,$9.99,$9.99,2021-04-08,280,2,8,Very Positive,265,60,325,11550_1,1
+11610,Dragon Nest,game,True,,,,,2012-12-18,,3,6,Mostly Positive,1639,655,2294,11610_1,1
+12130,Manhunt,game,False,USD,0,$9.99,$9.99,2008-01-04,8074,44,6,Mostly Positive,6825,2748,9573,12130_1,1
+12140,Max Payne,game,False,USD,0,$9.99,$9.99,2011-01-06,12741,53,8,Very Positive,14066,1781,15847,12140_1,1
+12150,Max Payne 2: The Fall of Max Payne,game,False,USD,0,$9.99,$9.99,2008-01-04,12045,91,8,Very Positive,13834,831,14665,12150_1,1
+12200,Bully: Scholarship Edition,game,False,USD,0,$14.99,$14.99,2008-10-21,37406,202,8,Very Positive,35454,6527,41981,12200_1,1
+12210,Grand Theft Auto IV: The Complete Edition,game,False,USD,0,$19.99,$19.99,2020-03-24,179905,4327,8,Very Positive,169025,33861,202886,12210_1,1
+12220,Grand Theft Auto: Episodes from Liberty City,game,False,,,,,2010-04-12,7210,0,6,Mostly Positive,7470,2602,10072,12220_1,1
+12310,Culpa Innata,game,False,USD,0,$9.99,$9.99,2008-01-18,103,0,6,Mostly Positive,89,30,119,12310_1,1
+12320,Sacred Gold,game,False,USD,0,$9.99,$9.99,2008-07-09,3990,77,8,Very Positive,3942,677,4619,12320_1,1
+12330,Darkstar One,game,False,USD,0,$8.99,$8.99,2008-02-13,590,2,8,Very Positive,522,103,625,12330_1,1
+12360,FlatOut: Ultimate Carnage Collector's Edition,game,False,USD,75,$39.99,$9.99,2008-08-26,6728,61,8,Very Positive,6956,772,7728,12360_1,1
+12364,Big Mutha Truckers,game,False,USD,0,$8.99,$8.99,2025-06-08,,0,7,Positive,35,3,38,12364_1,1
+12390,Exodus from the Earth,game,False,USD,0,$14.99,$14.99,2008-10-24,203,0,5,Mixed,146,105,251,12390_1,1
+12420,Perimeter 2: New Earth,game,False,USD,0,$5.99,$5.99,2009-02-10,,0,4,Mostly Negative,18,57,75,12420_1,1
+12430,SlamIt Pinball Big Score,game,False,USD,0,$4.99,$4.99,2009-02-23,109,0,4,Mostly Negative,44,86,130,12430_1,1
+12440,Ankh 2: Heart of Osiris ,game,False,USD,80,$13.99,$2.79,2009-06-16,,0,6,Mostly Positive,49,20,69,12440_1,1
+12450,Ankh 3: Battle of the Gods,game,False,USD,80,$13.99,$2.79,2009-06-16,,0,6,Mostly Positive,31,11,42,12450_1,1
+12460,BC Kings,game,False,USD,0,$3.99,$3.99,2009-06-16,192,0,5,Mixed,138,78,216,12460_1,1
+12470,Port Royale 2,game,False,USD,0,$5.99,$5.99,2009-06-16,658,29,6,Mostly Positive,505,203,708,12470_1,1
+12480,9th Company: Roots Of Terror,game,False,USD,0,$9.99,$9.99,2009-12-03,217,0,5,Mixed,158,106,264,12480_1,1
+12500,PuzzleQuest: Challenge of the Warlords,game,False,USD,0,$9.99,$9.99,2008-01-29,1024,12,8,Very Positive,979,151,1130,12500_1,1
+12510,Prison Tycoon 3™: Lockdown,game,False,USD,0,$9.99,$9.99,2008-01-29,121,0,4,Mostly Negative,28,96,124,12510_1,1
+12520,18 Wheels of Steel: American Long Haul,game,False,USD,0,$9.99,$9.99,2008-01-29,432,1,6,Mostly Positive,388,138,526,12520_1,1
+12530,Hunting Unlimited™ 2008,game,False,USD,0,$9.99,$9.99,2008-01-29,,0,8,Very Positive,76,10,86,12530_1,1
+12540,Mahjongg Investigations: Under Suspicion,game,False,USD,0,$9.99,$9.99,2008-07-29,,0,6,Mostly Positive,28,8,36,12540_1,1
+12560,Ride! Carnival Tycoon,game,False,USD,0,$9.99,$9.99,2008-07-29,,0,5,Mixed,22,28,50,12560_1,1
+12570,Hot Dish,game,False,USD,0,$9.99,$9.99,2008-07-29,,0,5,Mixed,16,18,34,12570_1,1
+12580,Dr. Daisy Pet Vet,game,False,USD,0,$9.99,$9.99,2008-07-29,,0,5,Mixed,12,13,25,12580_1,1
+12590,Sprint Cars Road to Knoxville,game,False,USD,0,$9.99,$9.99,2008-07-29,,1,5,Mixed,38,31,69,12590_1,1
+12600,Midnight Outlaw: 6 Hours to SunUp,game,False,USD,0,$9.99,$9.99,2008-07-29,,0,4,Mostly Negative,16,39,55,12600_1,1
+12640,Drakensang,game,False,USD,0,$9.99,$9.99,2009-03-09,663,14,8,Very Positive,644,152,796,12640_1,1
+12650,Fetch It Again,game,False,USD,0,$6.99,$6.99,2009-07-17,,0,0,5 user reviews,3,2,5,12650_1,1
+12660,Miss Popularity,game,False,USD,0,$6.99,$6.99,2009-07-17,,0,6,Mostly Positive,7,3,10,12660_1,1
+12670,Mission Runway,game,False,USD,0,$9.99,$9.99,2009-07-17,,0,5,Mixed,13,7,20,12670_1,1
+12690,Hunting Unlimited 2010,game,False,USD,0,$9.99,$9.99,2009-07-07,323,1,8,Very Positive,327,57,384,12690_1,1
+12710,Overlord™: Raising Hell,game,False,USD,0,$9.99,$9.99,2008-02-28,1992,37,8,Very Positive,2417,182,2599,12710_1,1
+12810,Overlord II,game,False,USD,0,$9.99,$9.99,2009-06-23,4000,38,8,Very Positive,4430,550,4980,12810_1,1
+12900,AudioSurf,game,False,USD,0,$9.99,$9.99,2008-02-15,8900,11,9,Overwhelmingly Positive,10622,479,11101,12900_1,1
+13000,Ninja Reflex: Steamworks Edition,game,False,USD,0,$4.99,$4.99,2008-03-21,,0,8,Very Positive,52,7,59,13000_1,1
+13500,Prince of Persia: Warrior Within™,game,False,USD,0,$9.99,$9.99,2008-11-21,3922,29,8,Very Positive,3430,705,4135,13500_1,1
+13520,Far Cry®,game,False,USD,0,$9.99,$9.99,2008-04-01,11003,74,8,Very Positive,9632,2145,11777,13520_1,1
+13530,Prince of Persia: The Two Thrones™,game,False,USD,0,$9.99,$9.99,2008-11-21,2671,19,8,Very Positive,2253,549,2802,13530_1,1
+13540,Tom Clancy's Rainbow Six® Vegas,game,False,USD,0,$9.99,$9.99,2008-04-09,1625,7,6,Mostly Positive,1403,352,1755,13540_1,1
+13560,Tom Clancy's Splinter Cell®,game,False,USD,0,$9.99,$9.99,2008-04-01,3832,14,8,Very Positive,3542,492,4034,13560_1,1
+13570,Tom Clancy's Splinter Cell Chaos Theory®,game,False,USD,0,$9.99,$9.99,2009-08-27,5380,30,8,Very Positive,5396,410,5806,13570_1,1
+13580,Tom Clancy's Splinter Cell Double Agent®,game,False,USD,0,$9.99,$9.99,2009-02-13,1808,4,4,Mostly Negative,685,1255,1940,13580_1,1
+13600,Prince of Persia®: The Sands of Time,game,False,USD,0,$9.99,$9.99,2008-11-21,5041,19,8,Very Positive,4523,763,5286,13600_1,1
+13620,Tom Clancy's Ghost Recon® Desert Siege™,game,False,USD,0,$4.99,$4.99,2008-07-15,181,0,8,Very Positive,171,18,189,13620_1,1
+13630,Tom Clancy's Ghost Recon® Island Thunder™,game,False,USD,0,$4.99,$4.99,2008-07-15,186,0,8,Very Positive,170,25,195,13630_1,1
+15000,Tom Clancy's Rainbow Six Lockdown™,game,False,USD,0,$9.99,$9.99,2008-05-13,513,0,5,Mixed,323,216,539,15000_1,1
+15080,Rayman Raving Rabbids™,game,False,USD,0,$9.99,$9.99,2008-06-13,1931,3,8,Very Positive,1778,326,2104,15080_1,1
+15100,Assassin's Creed™: Director's Cut Edition,game,False,USD,0,$19.99,$19.99,2008-04-09,23848,31,8,Very Positive,20447,4928,25375,15100_1,1
+15120,Tom Clancy's Rainbow Six® Vegas 2,game,False,USD,0,$9.99,$9.99,2008-04-16,5359,15,8,Very Positive,5188,918,6106,15120_1,1

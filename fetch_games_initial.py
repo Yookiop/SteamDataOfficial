@@ -4,7 +4,7 @@
 SteamDataOfficial - Steam-game-catalogus via OFFICIELE Steam-bronnen
 ====================================================================
 
-Twee officiele Steam-bronnen (geen derde partijen zoals SteamSpy):
+Drie officiele Steam-bronnen (geen derde partijen zoals SteamSpy):
 
   1. Appid-lijst: de officiele Steam Web API (api.steampowered.com) met je
      eigen API key -> IStoreService/GetAppList/v1, GEPAGINEERD via
@@ -18,6 +18,16 @@ Twee officiele Steam-bronnen (geen derde partijen zoals SteamSpy):
      100 appids -> HTTP 400; geverifieerd 2026-09-04). Er gaat dus 1
      request per appid; Steam throttlet per IP met HTTP 429 (backoff), dus
      grote aantallen lopen over meerdere runs.
+  3. Review-samenvatting: de officiele Steam Review API
+     (store.steampowered.com/appreviews/{appid}) - ZONDER API key, 1
+     request per appid. Met language=all + purchase_type=all + filter=all
+     krijg je hetzelfde totaalbeeld als op de storepagina: ALLE reviews in
+     ALLE talen, inclusief niet-aangeschafte (belangrijk voor F2P-games -
+     zonder purchase_type=all toont Warframe bv. 2.871 reviews i.p.v.
+     676.084). num_per_page=0 -> alleen de query_summary (review_score +
+     review_score_desc zoals 'Very Positive'/'Mixed', en de positive/
+     negative/total-tellingen), geen review-teksten. Uitzetten kan met
+     --no-reviews.
 
 'Nieuwe games' zijn appids die wel in de officiele app-lijst zitten maar nog
 NIET in de JSON-output (data/games.jsonl). Van elke nieuwe game worden de
@@ -56,14 +66,18 @@ publishers, genres (namen), categories (namen), release_date (zoals de API
 hem geeft), release_date_format (zelfde datum in yyyy-mm-dd),
 recommendations_total, last_seen_player_count (momentopname van het huidige
 spelersaantal via GetNumberOfCurrentPlayers, keyless; None bij geen
-publieke data) en appid_amount ("<appid>_1" - elke game staat in DIT bestand
-maar 1x). De TIJDLIJN (herhaald pollen) doet het zusterscript
-fetch_new_game_info.py: dat nummert verder met "<appid>_2", "_3", ... in
-data/player_history.jsonl.
+publieke data), review_score, review_score_desc (bv. 'Very Positive',
+'Mixed', 'No user reviews'), review_positive, review_negative,
+review_total (uit de Review API; None als die request mislukte). Elke game
+staat in DIT bestand (de basis) maar 1x en heeft GEEN appid_amount: de
+doorlopende per-game nummering ("<appid>_1", "_2", ...) leeft in het
+zusterscript fetch_new_game_info.py, dat herhaalde momentopnamen per game
+schrijft naar data/games_extra_info.jsonl.
 
 Gebruik:
-    python fetch_games_initial.py            # popup voor API key, dan verwerken
-    python fetch_games_initial.py --save-key # key bewaren in data/api_key.txt
+    python fetch_games_initial.py            # popup voor API key, daarna verwerken
+    python fetch_games_initial.py --key ABC.. # key meegeven; wordt meteen
+                                             # encoded bewaard voor volgende runs
     python fetch_games_initial.py --forget-key   # bewaarde key wissen
     python fetch_games_initial.py --limit 500    # max. 500 nieuwe appids deze run
     python fetch_games_initial.py --report-only  # alleen tonen welke nieuw zijn
@@ -71,15 +85,21 @@ Gebruik:
     python fetch_games_initial.py --blacklist-show           # blacklist tonen
     python fetch_games_initial.py --blacklist-add 100 200    # handmatig toevoegen
     python fetch_games_initial.py --blacklist-remove 100     # eruit halen -> weer 'nieuw'
+    python fetch_games_initial.py --no-reviews  # review-samenvatting overslaan
+
+    De API key wordt de eerste keer AUTOMATISCH encoded (XOR+base64) bewaard
+    in %APPDATA%/SteamDataOfficial/api_key.txt - BUIEN de repo (data/ wordt
+    gecommit en mag geen key bevatten). Een volgende run leest hem daar
+    gewoon weer uit en vraagt dus niet opnieuw om de key.
 
     Dit is de EENMALIGE volledige doorgang: elke game komt precies 1x in
-    data/games.jsonl (appid_amount "<appid>_1"). Het zusterscript
-    fetch_new_game_info.py voegt daar herhaalde regels aan toe in
-    data/player_history.jsonl ("<appid>_2", "_3", ...) voor een tijdlijn
-    van last_seen_player_count.
+    data/games.jsonl (de basis, ZONDER appid_amount). Het zusterscript
+    fetch_new_game_info.py schrijft daarnaast herhaalde momentopnamen per
+    game naar data/games_extra_info.jsonl, genummerd "<appid>_1", "_2", ...
 """
 
 import argparse
+import base64
 import json
 import os
 import random
@@ -98,6 +118,7 @@ LEGACY_APP_LIST_URL = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
 APP_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
 PLAYER_COUNT_URL = ("https://api.steampowered.com/ISteamUserStats/"
                     "GetNumberOfCurrentPlayers/v1/")
+REVIEWS_URL = "https://store.steampowered.com/appreviews/{appid}"
 STORE_BATCH = 1     # appids per storefront-request. appdetails accepteert
                     # maar EEN appid per request (geverifieerd 2026-09-04:
                     # meerdere herhaalde appids gaven alleen de laatste
@@ -132,8 +153,77 @@ def http_get_json(url):
 
 
 # --------------------------------------------------------------------------- #
-#  API key: popup eerst, dan console, optioneel bewaren                        #
+#  API key: popup/console of --key, daarna AUTOMATISCH encoded bewaard.        #
+#  De key staat BUIEN de repo (data/ wordt gecommit en mag geen key            #
+#  bevatten). Encoden = XOR-masker + base64: bewust alleen obfuscatie,         #
+#  geen echte beveiliging - wie de code heeft kan de key teruglezen.           #
 # --------------------------------------------------------------------------- #
+_KEY_MASK = b"SteamDataOfficial::api-key::2026-09-05"
+
+
+def _encode_key(key):
+    """Key -> XOR-masker + urlsafe-base64 (voor opslag, geen beveiliging)."""
+    data = key.encode("utf-8")
+    masked = bytes(b ^ _KEY_MASK[i % len(_KEY_MASK)]
+                   for i, b in enumerate(data))
+    return base64.urlsafe_b64encode(masked).decode("ascii")
+
+
+def _decode_key(token):
+    """Omgekeerde van _encode_key; None bij een kapot/onbekend formaat."""
+    try:
+        masked = base64.urlsafe_b64decode(token.encode("ascii"))
+        data = bytes(b ^ _KEY_MASK[i % len(_KEY_MASK)]
+                     for i, b in enumerate(masked))
+        return data.decode("utf-8")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _looks_like_key(key):
+    """Steam Web API keys zijn altijd 32 hex-karakters."""
+    return bool(re.fullmatch(r"[0-9A-Fa-f]{32}", (key or "").strip()))
+
+
+def default_keyfile():
+    """Standaardplek van de bewaarde API key: BUIEN de repo, in
+    %APPDATA%/SteamDataOfficial (of de home-map als APPDATA ontbreekt).
+    Zo kan de key nooit met de repo mee gecommit worden."""
+    base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "SteamDataOfficial", "api_key.txt")
+
+
+def save_key_encoded(keyfile, key):
+    """Schrijf de key encoded weg (maakt de map aan indien nodig)."""
+    folder = os.path.dirname(keyfile)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    with open(keyfile, "w", encoding="utf-8") as f:
+        f.write(_encode_key(key) + "\n")
+
+
+def load_saved_key(keyfile):
+    """Lees de bewaarde (encoded) key uit keyfile. Migreert een oud
+    plaintext-bestand automatisch naar encoded. Retourneert None als er
+    geen geldige key staat."""
+    if not os.path.isfile(keyfile):
+        return None
+    try:
+        with open(keyfile, encoding="utf-8") as f:
+            content = f.read().strip()
+    except OSError:
+        return None
+    if not content:
+        return None
+    key = _decode_key(content)
+    if _looks_like_key(key):
+        return key
+    if _looks_like_key(content):        # oud formaat (plaintext) -> migreren
+        save_key_encoded(keyfile, content)
+        return content
+    return None
+
+
 def ask_key_popup():
     """GUI-popup (tkinter, standaard meegeleverd met Python op Windows) om de
     API key in te vullen. Retourneert None als er geen GUI beschikbaar is."""
@@ -154,17 +244,20 @@ def ask_key_popup():
         return None
 
 
-def resolve_api_key(args, data_dir):
-    """Bepaal de key: --key > bewaarde key > popup > console-invoer."""
+def resolve_api_key(args):
+    """Bepaal de key: --key > bewaarde (encoded) key > popup > console.
+    Een nieuw verkregen key wordt MET EEN encoded bewaard op de
+    standaardplek buiten de repo, zodat volgende runs hem niet opnieuw
+    vragen (een aparte --save-key is niet meer nodig)."""
+    keyfile = args.keyfile or default_keyfile()
     if args.key:
+        save_key_encoded(keyfile, args.key)
+        print(f"> API key bewaard (encoded) in {keyfile}")
         return args.key
 
-    keyfile = os.path.join(data_dir, "api_key.txt")
-    if os.path.isfile(keyfile):
-        with open(keyfile, encoding="utf-8") as f:
-            saved = f.read().strip()
-        if saved:
-            return saved
+    saved = load_saved_key(keyfile)
+    if saved:
+        return saved
 
     key = ask_key_popup()
     if key is None:                       # geen GUI of geannuleerd
@@ -173,12 +266,12 @@ def resolve_api_key(args, data_dir):
         except EOFError:
             key = ""
     if not key:
-        print("! Geen API key opgegeven (gebruik --key of --save-key).")
+        print("! Geen API key opgegeven (gebruik --key <key> om hem te "
+              "bewaren, of vul hem in).")
         sys.exit(1)
-    if args.save_key:
-        with open(keyfile, "w", encoding="utf-8") as f:
-            f.write(key + "\n")
-        print(f"> API key bewaard in {keyfile}")
+    save_key_encoded(keyfile, key)
+    print(f"> API key bewaard (encoded) in {keyfile} - volgende runs vragen "
+          "hem niet meer op.")
     return key
 
 
@@ -434,6 +527,46 @@ def fetch_player_count(appid, timeout=30):
     return None
 
 
+def fetch_review_summary(appid, timeout=30):
+    """Review-samenvatting via store.steampowered.com/appreviews/{appid}
+    (officieel, keyless). language=all + purchase_type=all + filter=all ->
+    hetzelfde totaalbeeld als op de storepagina (voor F2P-games telt
+    purchase_type=all de niet-aangeschafte reviews mee). num_per_page=0 ->
+    alleen de query_summary, geen review-teksten. Retourneert
+    {"review_score":.., "review_score_desc":.., "review_positive":..,
+    "review_negative":.., "review_total":..} of None als de request na 2
+    pogingen mislukte. Een game ZONDER reviews geeft geen None maar een
+    lege summary (desc 'No user reviews', alles 0). Wordt NOOIT gebruikt
+    om te blacklisten of de run te stoppen."""
+    url = REVIEWS_URL.format(appid=appid) + "?" + urllib.parse.urlencode({
+        "json": 1, "language": "all", "purchase_type": "all",
+        "filter": "all", "num_per_page": 0})
+    for attempt in (1, 2):
+        if stop_requested:
+            return None
+        try:
+            req = urllib.request.Request(url,
+                                         headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                payload = json.loads(
+                    resp.read().decode("utf-8", errors="replace"))
+            qs = ((payload.get("query_summary") or {})
+                  if isinstance(payload, dict) else {})
+            if not isinstance(qs, dict):
+                return None
+            return {
+                "review_score": qs.get("review_score"),
+                "review_score_desc": qs.get("review_score_desc"),
+                "review_positive": qs.get("total_positive"),
+                "review_negative": qs.get("total_negative"),
+                "review_total": qs.get("total_reviews"),
+            }
+        except Exception:  # noqa: BLE001 - netwerk/parse/throttle
+            if attempt == 1:
+                wait_chunked(2.0)
+    return None
+
+
 # --------------------------------------------------------------------------- #
 #  Storefront ophalen (batches, USD)                                           #
 # --------------------------------------------------------------------------- #
@@ -563,13 +696,16 @@ def main(argv=None):
                     "Storefront API (USD). 'Nieuw' = appid in de API-lijst "
                     "dat nog niet in de JSON-output staat.")
     p.add_argument("--key", default=None,
-                   help="Steam Web API key (overslaat de popup)")
-    p.add_argument("--save-key", action="store_true",
-                   help="de ingevulde key bewaren in <data-dir>/api_key.txt")
+                   help="Steam Web API key (overslaat de popup; wordt meteen "
+                        "encoded bewaard voor volgende runs)")
+    p.add_argument("--keyfile", default=None,
+                   help="pad van het bestand met de bewaarde (encoded) key "
+                        "(default: buiten de repo, in "
+                        "%%APPDATA%%/SteamDataOfficial/api_key.txt)")
     p.add_argument("--forget-key", action="store_true",
                    help="bewaarde key wissen en stoppen")
     p.add_argument("--data-dir", default="data",
-                   help="map voor key + aux-output (default: data)")
+                   help="map voor de aux-output (default: data)")
     p.add_argument("--out", default=None,
                    help="JSON-output (jsonl) om tegen te diffen; default: "
                         "<data-dir>/games.jsonl")
@@ -611,6 +747,9 @@ def main(argv=None):
                    help=f"veiligheidslimiet op het aantal store-requests "
                         f"(1 appid per HTTP-call) per run "
                         f"(default: {DEFAULT_MAX_REQUESTS})")
+    p.add_argument("--no-reviews", action="store_true",
+                   help="geen review-samenvatting ophalen (Review API, 1 "
+                        "extra request per game); default: wel")
     args = p.parse_args(argv)
 
     data_dir = os.path.abspath(args.data_dir)
@@ -668,7 +807,7 @@ def main(argv=None):
         return
 
     if args.forget_key:
-        keyfile = os.path.join(data_dir, "api_key.txt")
+        keyfile = args.keyfile or default_keyfile()
         if os.path.isfile(keyfile):
             os.remove(keyfile)
             print(f"> Bewaarde API key verwijderd ({keyfile})")
@@ -688,7 +827,7 @@ def main(argv=None):
         print("> Reset: games/blacklist/duplicates.jsonl gewist - "
               "begint opnieuw vanaf het begin van de app-lijst")
 
-    key = resolve_api_key(args, data_dir)
+    key = resolve_api_key(args)
 
     print("\n=== SteamDataOfficial: catalogus via officiele Steam-bronnen ===")
     print("> Officiele app-lijst ophalen (Web API, keyed) ...")
@@ -792,12 +931,21 @@ def main(argv=None):
                         if append_duplicates(data_dir, [dup_record], dup_seen):
                             stats["dup_saved"] += 1
                     else:
-                        # Momenteel spelersaantal (keyless, robuust) + dit is
-                        # de EERSTE (en enige) opname van deze game -> _1.
+                        # Momenteel spelersaantal (keyless, robuust); dit is
+                        # de enige regel van deze game in de basis (geen
+                        # appid_amount - die nummering doet de extra-info).
                         pc = fetch_player_count(aid, args.timeout)
                         stats["requests"] += 1
                         info["last_seen_player_count"] = pc
-                        info["appid_amount"] = f"{aid}_1"
+                        if args.no_reviews:
+                            rev = None
+                        else:
+                            rev = fetch_review_summary(aid, args.timeout)
+                            stats["requests"] += 1
+                        for key in ("review_score", "review_score_desc",
+                                    "review_positive", "review_negative",
+                                    "review_total"):
+                            info[key] = (rev or {}).get(key)
                         games_file.write(
                             json.dumps(info, ensure_ascii=False) + "\n")
                         games_file.flush()
@@ -807,7 +955,8 @@ def main(argv=None):
                         added_titles.add(title)
                         title_appid.setdefault(title, aid)
                         print(f"   + {aid}  {info.get('name')}  "
-                              f"(players: {pc})")
+                              f"(players: {pc}, reviews: "
+                              f"{info.get('review_score_desc')})")
                 elif outcome in ("other", "skipped"):
                     stats[outcome] += 1
                     # Geen game / geen storepagina / geblokkeerd: afgehandeld

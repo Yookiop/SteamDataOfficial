@@ -9,13 +9,19 @@ fetch_games_initial.py) en schrijft daar een 'dbt-achtige' set CSV-bestanden
 vanuit, zodat je de data in Excel/sheets kunt bekijken zonder dbt Cloud:
 
     games.csv             HOOFDTABEL - 1 regel per appid (scalaire velden +
-                          price_overview platgeslagen naar price_*-kolommen)
+                          price_overview platgeslagen naar price_*_fmt-
+                          kolommen; alleen de leesbare bedragen, geen ruwe
+                          centen, incl. de review-samenvatting: review_score,
+                          review_score_desc, review_positive, review_negative,
+                          review_total). GEEN appid_amount: dit is de basis,
+                          elke appid komt er maar 1x in voor
     game_genres.csv       appid + genre (1 regel per genre per appid)
     game_categories.csv   appid + category (1 regel per category per appid)
     game_publishers.csv   appid + publisher (1 regel per publisher per appid)
-    player_history.csv    TIJDLIJN (player_history.jsonl) - 1 regel per
-                          meting per appid (last_seen_player_count over de
-                          tijd; appid_amount _2, _3, ...; + refresh_count)
+    games_extra_info.csv  EXTRA INFO (games_extra_info.jsonl, was
+                          player_history.jsonl) - 1 regel per momentopname
+                          per appid (de doorlopende reeks per game: appid_amount
+                          _1, _2, ...; + refresh_count)
     date.csv              DATE-DIMENSIE - elke dag van --date-start t/m
                           --date-end (default 2003-01-01 t/m 2026-12-31),
                           join-key: date_fmt (= release_date_fmt)
@@ -26,16 +32,17 @@ appid. Binnen een appid worden dubbele waarden eruit gefilterd (de bron-API
 geeft bv. bij Half-Life 2 'DualShock Controller Support' 2x terug), zodat de
 losse tabellen netjes uniek zijn per (appid, waarde).
 
-Naast data/games.jsonl (fetch_games_initial.py) leest het script ook
-data/player_history.jsonl (fetch_new_game_info.py, de tijdlijn) en schrijft
-daarvan player_history.csv: elke regel is daar een aparte meting, dus een
-appid kan meerdere regels hebben (gesorteerd op appid + meetnummer). Staat de
-tijdlijn er niet, dan wordt alleen player_history.csv overgeslagen.
+Naast data/games.jsonl (fetch_games_initial.py, de basis) leest het script
+ook data/games_extra_info.jsonl (fetch_new_game_info.py; was
+player_history.jsonl) en schrijft daarvan games_extra_info.csv: elke regel
+is daar een aparte momentopname, dus een appid kan meerdere regels hebben
+(gesorteerd op appid + appid_amount-nummer _1, _2, ...). Staat het
+bestand er niet, dan wordt alleen games_extra_info.csv overgeslagen.
 
-Games.csv en player_history.csv houden alleen release_date_fmt bij (de
+Games.csv en games_extra_info.csv houden alleen release_date_fmt bij (de
 join-sleutel); de datumdelen (year, month_number, month_label, day_of_week,
 day_of_week_label, day_of_month) staan uitsluitend in date.csv. Je joint
-games.csv/player_history.csv dus op release_date_fmt = date_fmt met
+games.csv/games_extra_info.csv dus op release_date_fmt = date_fmt met
 date.csv en haalt de datumdelen daar vandaan.
 
 Output staat standaard naast de invoer (data/). De bestanden zijn UTF-8 met
@@ -44,7 +51,7 @@ BOM (utf-8-sig), zodat Excel de tekst/valuta-codes goed toont.
 Gebruik:
     python jsonl_to_table.py
     python jsonl_to_table.py --input data/games.jsonl
-    python jsonl_to_table.py --history data/player_history.jsonl
+    python jsonl_to_table.py --extra data/games_extra_info.jsonl
 """
 
 import argparse
@@ -62,16 +69,23 @@ MAIN_FIELDS = [
     ("type",               ["type"]),
     ("is_free",            ["is_free"]),
     ("price_currency",     ["price_overview", "currency"]),
-    ("price_initial",      ["price_overview", "initial"]),      # centen (USD)
-    ("price_final",        ["price_overview", "final"]),        # centen (USD)
     ("price_discount_pct", ["price_overview", "discount_percent"]),
     ("price_initial_fmt",  ["price_overview", "initial_formatted"]),
     ("price_final_fmt",    ["price_overview", "final_formatted"]),
-    ("release_date",       ["release_date"]),
+    # Alleen de *_fmt-varianten in de CSV: de ruwe centen (price_initial /
+    # price_final) en de leesbare release_date-tekst staan wél in de jsonl
+    # maar niet in de tabellen; er wordt gejoind op release_date_fmt.
     ("release_date_fmt",   ["release_date_format"]),
     ("recommendations",    ["recommendations_total"]),
     ("last_seen_players",  ["last_seen_player_count"]),
-    ("appid_amount",       ["appid_amount"]),
+    ("review_score",       ["review_score"]),          # 0-10 (Review API)
+    ("review_score_desc",  ["review_score_desc"]),     # bv. Very Positive/Mixed
+    ("review_positive",    ["review_positive"]),
+    ("review_negative",    ["review_negative"]),
+    ("review_total",       ["review_total"]),
+    # GEEN appid_amount: games.csv is de basis (elke appid 1x). De
+    # doorlopende per-game nummering zit in games_extra_info.csv (zie
+    # HISTORY_FIELDS hieronder).
 ]
 
 CHILD_TABLES = [          # bestandsnaam    -> pad in het JSON-record
@@ -80,12 +94,13 @@ CHILD_TABLES = [          # bestandsnaam    -> pad in het JSON-record
     ("game_publishers",  ["publishers"]),
 ]
 
-# Voor de TIJDLIJN (player_history.jsonl) geldt dezelfde layout als de
-# hoofdtabel, plus refresh_count. Daar is elke regel een aparte meting: het
-# appid_amount vervolgt met _2, _3, ... (nummering inclusief de initiele
-# opname uit de master).
+# Voor games_extra_info.jsonl (was player_history.jsonl) geldt dezelfde
+# layout als de hoofdtabel, plus appid_amount en refresh_count. Daar is
+# elke regel een aparte momentopname: de doorlopende reeks per game begint
+# bij _1 en loopt op met _2, _3, ... (de basis/master telt niet mee).
 HISTORY_FIELDS = MAIN_FIELDS + [
-    ("refresh_count",    ["refresh_count"]),
+    ("appid_amount",       ["appid_amount"]),
+    ("refresh_count",      ["refresh_count"]),
 ]
 
 # Datumdelen voor de date-dimensie (date.csv).
@@ -161,7 +176,8 @@ def write_csv(path, rows, fields):
 
 def amount_ordinal(row):
     """Het getal achter '_' in appid_amount ('730_2' -> 2), of 0 als het
-    ontbreekt/onherkenbaar is. Zet de tijdlijn per appid in meetvolgorde."""
+    ontbreekt/onherkenbaar is. Zet games_extra_info per appid in
+    meetvolgorde."""
     m = re.search(r"_(\d+)\s*$", str(row.get("appid_amount") or ""))
     return int(m.group(1)) if m else 0
 
@@ -219,10 +235,10 @@ def main(argv=None):
     p.add_argument("--out-dir", default=None,
                    help="output-map voor de CSV's (default: map van de "
                         "invoer)")
-    p.add_argument("--history", default="data/player_history.jsonl",
-                   help="invoer-tijdlijn van fetch_new_game_info.py, voor "
-                        "player_history.csv (default: "
-                        "data/player_history.jsonl)")
+    p.add_argument("--extra", default="data/games_extra_info.jsonl",
+                   help="invoer extra-info van fetch_new_game_info.py, voor "
+                        "games_extra_info.csv (default: "
+                        "data/games_extra_info.jsonl)")
     p.add_argument("--date-start", default="2003-01-01",
                    help="begin datum voor date.csv (default: 2003-01-01)")
     p.add_argument("--date-end", default="2026-12-31",
@@ -271,25 +287,26 @@ def main(argv=None):
             writer.writerows(sorted(child_rows[name]))
         print(f"> {path} ({len(child_rows[name])} regels)")
 
-    # Tijdlijn (player_history.jsonl, geschreven door fetch_new_game_info.py):
-    # 1 rij per meting (meerdere rijen per appid: _2, _3, ...). Ontbreekt de
-    # tijdlijn, dan wordt alleen player_history.csv overgeslagen.
-    hist_path = os.path.abspath(args.history)
-    if os.path.isfile(hist_path):
-        hist_records, _ = read_records(hist_path)
-        if hist_records:
-            hist_rows = flatten_rows(hist_records, HISTORY_FIELDS)
-            hist_rows.sort(key=lambda r: (r["appid"] is None,
-                                          r["appid"] or 0,
-                                          amount_ordinal(r)))
-            out = os.path.join(out_dir, "player_history.csv")
-            n = write_csv(out, hist_rows, HISTORY_FIELDS)
-            print(f"> Tijdlijn geschreven: {out} ({n} regels, "
-                  "1 per meting per appid)")
+    # Extra info (games_extra_info.jsonl, geschreven door
+    # fetch_new_game_info.py): 1 rij per momentopname (meerdere rijen per
+    # appid: _1, _2, ...). Ontbreekt het bestand, dan wordt alleen
+    # games_extra_info.csv overgeslagen.
+    extra_path = os.path.abspath(args.extra)
+    if os.path.isfile(extra_path):
+        extra_records, _ = read_records(extra_path)
+        if extra_records:
+            extra_rows = flatten_rows(extra_records, HISTORY_FIELDS)
+            extra_rows.sort(key=lambda r: (r["appid"] is None,
+                                           r["appid"] or 0,
+                                           amount_ordinal(r)))
+            out = os.path.join(out_dir, "games_extra_info.csv")
+            n = write_csv(out, extra_rows, HISTORY_FIELDS)
+            print(f"> Extra info geschreven: {out} ({n} regels, "
+                  "1 per momentopname per appid)")
         else:
-            print(f"> {hist_path} is leeg - geen player_history.csv.")
+            print(f"> {extra_path} is leeg - geen games_extra_info.csv.")
     else:
-        print(f"> {hist_path} niet gevonden - player_history.csv "
+        print(f"> {extra_path} niet gevonden - games_extra_info.csv "
               "overgeslagen.")
 
     # Date-dimensie (date.csv): elke dag in het bereik, join-key date_fmt.

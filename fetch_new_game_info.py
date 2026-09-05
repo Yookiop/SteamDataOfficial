@@ -1,41 +1,59 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SteamDataOfficial - TIJDLIJN-script: herhaald per game pollen
-=============================================================
+SteamDataOfficial - extra-info-script (was tijdlijn/player_history):
+herhaald per game pollen
+=====================================================================
 
 Zusterscript van fetch_games_initial.py. Waar dat script elke game EEN keer
-ophaalt (data/games.jsonl, de unieke masterlijst), voegt DIT script per run
-een EXTRA regel per game toe aan data/player_history.jsonl - zodat je per
-game een tijdlijn krijgt van last_seen_player_count (bv. 10_1 in de master,
-dan 10_2, 10_3, ... in de history).
+ophaalt (data/games.jsonl - de basis: elke game 1x, ZONDER appid_amount),
+schrijft DIT script per run een EXTRA regel per game naar
+data/games_extra_info.jsonl (hernoemd van player_history.jsonl): een
+doorlopende reeks momentopnamen per game, genummerd "<appid>_1", "_2",
+"_3", ... De nummering is per game binnen games_extra_info zelf: de eerste
+regel van een game is <appid>_1 (de master/basis telt dus NIET meer mee).
+
+De basis (data/games.jsonl, 1 record per game) wordt bij elke run
+automatisch bijgewerkt met de LAATST BEKENDE review-samenvatting per game
+(die uit de momentopnamen van games_extra_info); zo heeft games.json ook de
+review_*-velden. Zonder netwerk kan dat ook los: --sync-reviews.
 
 Per game per run (games met de MEESTE spelers eerst, daarna aflopend):
   1. Dezelfde slanke velden als fetch_games_initial (vers opgehaald uit de
      officiele Storefront API, cc=us + l=english -> USD).
   2. last_seen_player_count (momentopname, keyless via
      ISteamUserStats/GetNumberOfCurrentPlayers; None bij geen publieke data).
-  3. appid_amount = "<appid>_<n>" met doorlopende nummering INCLUSIEF de
-     initiele opname: de masterrij is <appid>_1, de eerste history-regel
-     wordt <appid>_2, daarna <appid>_3, ... Het aantal komt uit het aantal
-     eerdere regels van dat appid in player_history.jsonl.
-  4. refresh_count = 1 op ELKE history-regel: zo kun je later per game het
-     aantal vernieuwingen optellen (som van refresh_count per appid).
+  3. De review-samenvatting (officiele Review API
+     store.steampowered.com/appreviews/{appid}, keyless): review_score,
+     review_score_desc (bv. 'Very Positive', 'Mixed'), review_positive,
+     review_negative en review_total - met language=all + purchase_type=all
+     + filter=all (zelfde totaalbeeld als de storepagina; zie
+     fetch_games_initial.py). Zo zie je per game ook hoe de beoordeling
+     over de tijd verandert. Uitzetten kan met --no-reviews.
+  4. appid_amount = "<appid>_<n>" met doorlopende nummering per game binnen
+     games_extra_info.jsonl: de eerste regel van een game is <appid>_1,
+     daarna <appid>_2, _3, ...
+  5. refresh_count = 1 op ELKE regel: zo kun je later per game het aantal
+     vernieuwingen optellen (som van refresh_count per appid).
 
 Volgorde: gesorteerd op het LAATST bekende spelersaantal per game (eerst de
-laatste history-regel van dat appid, anders de masterwaarde uit games.jsonl),
-aflopend; bij gelijk -> oplopend appid. Zo vernieuwt een run met --limit
-altijd eerst de populairste games.
+laatste games_extra_info-regel van dat appid, anders de masterwaarde uit
+games.jsonl), aflopend; bij gelijk -> oplopend appid. Zo vernieuwt een run
+met --limit altijd eerst de populairste games.
 
 Anders dan fetch_games_initial wordt er dus NIET geskipt op bekende appids,
- niet gededuped en niet geblacklist: elke run telt. Geen API key nodig (dit
-script haalt alleen de (keyless) store- en spelersaantal-data op van games
-die al in de master staan).
+niet gededuped en niet geblacklist: elke run telt. Geen API key nodig (dit
+script haalt alleen de (keyless) store-, spelersaantal- en review-data op
+van games die al in de master staan).
 
 Gebruik:
     python fetch_new_game_info.py             # alle games pollen (meeste spelers eerst)
     python fetch_new_game_info.py --limit 500 # max. 500 games deze run (populairste eerst)
     python fetch_new_game_info.py --report-only   # alleen tonen wat er zou komen
+    python fetch_new_game_info.py --no-reviews    # review-samenvatting overslaan
+    python fetch_new_game_info.py --sync-reviews  # basis (games.jsonl) bijwerken met de
+                                                  # laatst bekende reviews en stoppen
+                                                  # (geen netwerk)
 """
 
 import argparse
@@ -54,6 +72,7 @@ from datetime import datetime
 APP_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
 PLAYER_COUNT_URL = ("https://api.steampowered.com/ISteamUserStats/"
                     "GetNumberOfCurrentPlayers/v1/")
+REVIEWS_URL = "https://store.steampowered.com/appreviews/{appid}"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -65,6 +84,11 @@ DEFAULT_RETRIES = 6
 DEFAULT_MAX_REQUESTS = 10000
 
 stop_requested = False
+
+# Review-velden: staan in games_extra_info.jsonl als momentopname, en in
+# de basis games.jsonl als de LAATST BEKENDE waarde (1 record per game).
+REVIEW_KEYS = ("review_score", "review_score_desc", "review_positive",
+               "review_negative", "review_total")
 
 
 def on_signal(signum, frame):  # pragma: no cover - alleen interactief
@@ -204,7 +228,7 @@ def fetch_store_record(appid, args, stats):
             data = entry.get("data") or {}
             if data.get("type") == "game":
                 return slim_record(appid, data)
-            return None               # geen game (meer) -> niet in de tijdlijn
+            return None               # geen game (meer) -> niet in de extra-info
         elif code == 429:
             if attempt >= args.max_retries:
                 return None
@@ -241,6 +265,45 @@ def fetch_player_count(appid, timeout=30):
     return None
 
 
+def fetch_review_summary(appid, timeout=30):
+    """Review-samenvatting via store.steampowered.com/appreviews/{appid}
+    (officieel, keyless). language=all + purchase_type=all + filter=all ->
+    hetzelfde totaalbeeld als op de storepagina (voor F2P-games telt
+    purchase_type=all de niet-aangeschafte reviews mee). num_per_page=0 ->
+    alleen de query_summary, geen review-teksten. Retourneert
+    {"review_score":.., "review_score_desc":.., "review_positive":..,
+    "review_negative":.., "review_total":..} of None als de request na 2
+    pogingen mislukte. Een game ZONDER reviews geeft geen None maar een
+    lege summary (desc 'No user reviews', alles 0)."""
+    url = REVIEWS_URL.format(appid=appid) + "?" + urllib.parse.urlencode({
+        "json": 1, "language": "all", "purchase_type": "all",
+        "filter": "all", "num_per_page": 0})
+    for attempt in (1, 2):
+        if stop_requested:
+            return None
+        try:
+            req = urllib.request.Request(url,
+                                         headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                payload = json.loads(
+                    resp.read().decode("utf-8", errors="replace"))
+            qs = ((payload.get("query_summary") or {})
+                  if isinstance(payload, dict) else {})
+            if not isinstance(qs, dict):
+                return None
+            return {
+                "review_score": qs.get("review_score"),
+                "review_score_desc": qs.get("review_score_desc"),
+                "review_positive": qs.get("total_positive"),
+                "review_negative": qs.get("total_negative"),
+                "review_total": qs.get("total_reviews"),
+            }
+        except Exception:  # noqa: BLE001
+            if attempt == 1:
+                wait_chunked(2.0)
+    return None
+
+
 # --------------------------------------------------------------------------- #
 #  Master + history lezen                                                     #
 # --------------------------------------------------------------------------- #
@@ -268,13 +331,14 @@ def load_master(path):
     return master
 
 
-def load_history(path):
-    """Lees player_history.jsonl. Retourneert (counts, last_players): per
-    appid het aantal regels én het laatste bekende spelersaantal (de laatste
-    regel wint)."""
-    counts, last_players = {}, {}
+def load_extra_info(path):
+    """Lees games_extra_info.jsonl. Retourneert (counts, last_players,
+    latest_reviews): per appid het aantal regels, het laatste bekende
+    spelersaantal én de review-samenvatting van de LAATSTE regel (die
+    wint - om games.jsonl bij te werken met de laatst bekende data)."""
+    counts, last_players, latest_reviews = {}, {}, {}
     if not os.path.isfile(path):
-        return counts, last_players
+        return counts, last_players, latest_reviews
     for line in open(path, encoding="utf-8"):
         line = line.strip()
         if not line:
@@ -288,7 +352,32 @@ def load_history(path):
         pc = r.get("last_seen_player_count")
         if isinstance(pc, int):
             last_players[aid] = pc
-    return counts, last_players
+        if any(r.get(k) is not None for k in REVIEW_KEYS):
+            latest_reviews[aid] = {k: r.get(k) for k in REVIEW_KEYS}
+    return counts, last_players, latest_reviews
+
+
+def apply_latest_reviews(master, latest_reviews):
+    """Zet de laatst bekende review-samenvatting (uit games_extra_info) in
+    de basisrecords van games.jsonl (1 record per game). Retourneert het
+    aantal games dat is bijgewerkt."""
+    changed = 0
+    for aid, rev in latest_reviews.items():
+        rec = master.get(aid)
+        if rec is None or not rev:
+            continue
+        if any(rec.get(k) != rev.get(k) for k in REVIEW_KEYS):
+            for k in REVIEW_KEYS:
+                rec[k] = rev.get(k)
+            changed += 1
+    return changed
+
+
+def write_master(path, master):
+    """Schrijf de master (dict, volgorde bewaard) terug naar games.jsonl."""
+    with open(path, "w", encoding="utf-8") as f:
+        for rec in master.values():
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
 # --------------------------------------------------------------------------- #
@@ -296,22 +385,27 @@ def load_history(path):
 # --------------------------------------------------------------------------- #
 def main(argv=None):
     p = argparse.ArgumentParser(
-        description="TIJDLIJN: per run een extra regel per game toevoegen aan "
-                    "player_history.jsonl (zelfde velden + last_seen_player_"
-                    "count + doorlopende appid_amount). Geen API key nodig.")
+        description="EXTRA INFO: per run een extra regel per game toevoegen "
+                    "aan games_extra_info.jsonl (was player_history.jsonl: "
+                    "zelfde velden + last_seen_player_count + doorlopende "
+                    "appid_amount vanaf _1 per game). Geen API key nodig.")
     p.add_argument("--data-dir", default="data",
-                   help="map voor master + history (default: data)")
+                   help="map voor master + extra-info (default: data)")
     p.add_argument("--master", default=None,
                    help="unieke masterlijst (default: <data-dir>/games.jsonl)")
-    p.add_argument("--history", default=None,
-                   help="tijdlijn-output (default: "
-                        "<data-dir>/player_history.jsonl)")
+    p.add_argument("--extra", default=None,
+                   help="extra-info-output (default: "
+                        "<data-dir>/games_extra_info.jsonl)")
     p.add_argument("--limit", type=int, default=None,
                    help="max. aantal games dat deze run wordt verwerkt "
                         "(1 request per game; de rest komt de volgende run "
                         "aan de beurt; default: alle games)")
     p.add_argument("--report-only", action="store_true",
                    help="alleen tonen wat er zou worden toegevoegd")
+    p.add_argument("--sync-reviews", action="store_true",
+                   help="alleen de basis (games.jsonl) bijwerken met de "
+                        "laatst bekende review-samenvatting uit "
+                        "games_extra_info.jsonl en stoppen (geen netwerk)")
     p.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                    help=f"seconden rust tussen twee requests "
                         f"(default: {DEFAULT_DELAY})")
@@ -327,31 +421,46 @@ def main(argv=None):
     p.add_argument("--max-requests", type=int, default=DEFAULT_MAX_REQUESTS,
                    help=f"veiligheidslimiet op het aantal requests per run "
                         f"(default: {DEFAULT_MAX_REQUESTS})")
+    p.add_argument("--no-reviews", action="store_true",
+                   help="geen review-samenvatting ophalen (Review API, 1 "
+                        "extra request per game); default: wel")
     args = p.parse_args(argv)
 
     data_dir = os.path.abspath(args.data_dir)
     master_path = (os.path.abspath(args.master) if args.master
                    else os.path.join(data_dir, "games.jsonl"))
-    history_path = (os.path.abspath(args.history) if args.history
-                    else os.path.join(data_dir, "player_history.jsonl"))
+    extra_path = (os.path.abspath(args.extra) if args.extra
+                  else os.path.join(data_dir, "games_extra_info.jsonl"))
 
     master = load_master(master_path)
     if not master:
         print(f"! Geen games gevonden in {master_path}. Draai eerst "
               "fetch_games_initial.py om de masterlijst op te bouwen.")
         sys.exit(1)
-    hist_counts, hist_last = load_history(history_path)
+    extra_counts, extra_last, latest_reviews = load_extra_info(extra_path)
 
-    # Doorlopende nummering INCLUSIEF de initiele opname: master = _1, dus de
-    # eerstvolgende history-regel van een appid is _2, daarna _3, ...
+    # --sync-reviews: de basis (games.jsonl, 1 record per game) bijwerken
+    # met de laatst bekende reviews uit de momentopnamen en stoppen.
+    if args.sync_reviews:
+        changed = apply_latest_reviews(master, latest_reviews)
+        if changed:
+            write_master(master_path, master)
+        print(f"> Basis bijgewerkt met laatst bekende review-samenvatting "
+              f"voor {changed} games ({master_path})")
+        return
+
+    # Doorlopende nummering PER GAME binnen games_extra_info.jsonl: de
+    # eerste regel van een game is <appid>_1, daarna _2, _3, ... Het aantal
+    # komt uit het aantal eerdere regels van dat appid (de master/basis
+    # telt niet meer mee).
     def next_amount(aid):
-        return f"{aid}_{hist_counts.get(aid, 0) + 2}"
+        return f"{aid}_{extra_counts.get(aid, 0) + 1}"
 
     # Volgorde: laatste bekende spelersaantal per game (eerst de laatste
-    # history-regel van dat appid, anders de masterwaarde), aflopend -> de
-    # populairste games eerst.
+    # games_extra_info-regel van dat appid, anders de masterwaarde),
+    # aflopend -> de populairste games eerst.
     def order_score(aid):
-        val = hist_last.get(aid)
+        val = extra_last.get(aid)
         if val is None:
             val = master[aid].get("last_seen_player_count")
         return val if isinstance(val, int) else -1
@@ -359,10 +468,10 @@ def main(argv=None):
     ordered_ids = sorted(master,
                          key=lambda a: (-order_score(a), a))
 
-    print("\n=== SteamDataOfficial: tijdlijn (player count per game) ===")
+    print("\n=== SteamDataOfficial: extra info per game ===")
     print(f"Games in de master          : {len(master)}")
-    print(f"Al in player_history.jsonl  : {sum(hist_counts.values())} "
-          f"regels")
+    print(f"Al in games_extra_info.jsonl: "
+          f"{sum(extra_counts.values())} regels")
     print("Volgorde                    : meeste spelers eerst")
 
     lim = args.limit or None
@@ -382,9 +491,13 @@ def main(argv=None):
         print("> --report-only: niets opgehaald/toegevoegd.")
         return
 
+    # Basis (games.jsonl, 1 record per game) eerst bijwerken met de laatst
+    # bekende reviews uit games_extra_info (geen extra requests); games die
+    # deze run worden verwerkt krijgen daarna de verse waarde van nu.
+    master_dirty = apply_latest_reviews(master, latest_reviews) > 0
     stats = {"requests": 0, "added": 0, "skipped": 0}
     os.makedirs(data_dir, exist_ok=True)
-    hist_file = open(history_path, "a", encoding="utf-8")
+    extra_file = open(extra_path, "a", encoding="utf-8")
     processed = 0
     try:
         for aid in selected:
@@ -405,14 +518,33 @@ def main(argv=None):
                 pc = fetch_player_count(aid, args.timeout)
                 stats["requests"] += 1
                 record["last_seen_player_count"] = pc
+                if args.no_reviews:
+                    rev = None
+                else:
+                    rev = fetch_review_summary(aid, args.timeout)
+                    stats["requests"] += 1
+                for key in ("review_score", "review_score_desc",
+                            "review_positive", "review_negative",
+                            "review_total"):
+                    record[key] = (rev or {}).get(key)
                 record["appid_amount"] = next_amount(aid)
-                record["refresh_count"] = 1   # elke history-regel = 1 vernieuwing
-                hist_file.write(
+                record["refresh_count"] = 1   # elke extra-info-regel = 1 vernieuwing
+                extra_file.write(
                     json.dumps(record, ensure_ascii=False) + "\n")
-                hist_file.flush()
+                extra_file.flush()
                 stats["added"] += 1
+                if rev is not None:
+                    # Dit is nu de laatst bekende review-samenvatting -> ook
+                    # de basis (games.jsonl) van deze game bijwerken.
+                    rec = master.get(aid)
+                    if rec is not None:
+                        for key in REVIEW_KEYS:
+                            if rec.get(key) != record[key]:
+                                rec[key] = record[key]
+                                master_dirty = True
                 print(f"   + {aid}  {record.get('name')}  ->  "
-                      f"{record['appid_amount']}  (players: {pc})")
+                      f"{record['appid_amount']}  (players: {pc}, reviews: "
+                      f"{record.get('review_score_desc')})")
 
             processed += 1
             if processed % 25 == 0:
@@ -424,14 +556,19 @@ def main(argv=None):
             if not stop_requested:
                 wait_chunked(args.delay + random_jitter(args.jitter))
     finally:
-        hist_file.close()
+        extra_file.close()
+
+    if master_dirty:
+        write_master(master_path, master)
+        print("> Basis (games.jsonl) bijgewerkt met de laatst bekende "
+              "review-samenvatting.")
 
     print("\n=== Samenvatting ===")
     print(f"Games verwerkt deze run     : {processed}")
     print(f"Requests deze run           : {stats['requests']}")
-    print(f"Tijdlijnregels toegevoegd   : {stats['added']}")
+    print(f"Extra-info-regels toegevoegd: {stats['added']}")
     print(f"Overgeslagen (geen pagina)  : {stats['skipped']}")
-    print(f"Output                      : {history_path}")
+    print(f"Output                      : {extra_path}")
     if len(selected) > processed:
         print(f"\n> {len(selected) - processed} games nog niet aan bod; draai "
               "het script opnieuw voor de volgende.")
