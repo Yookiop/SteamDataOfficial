@@ -91,7 +91,12 @@ opgehaald (tijdelijke netwerk/429-fouten worden wél opnieuw geprobeerd).
 De blacklist is zelf beheerbaar — via `--blacklist-show` / `--blacklist-add` /
 `--blacklist-remove`, of door het bestand te bewerken: een appid eruit halen
 maakt hem weer 'nieuw'. Een titel wordt nooit twee keer toegevoegd: dubbele
-titels (China/regio-edities) belanden in `duplicates.jsonl`.
+titels (China/regio-edities) belanden in `duplicates.jsonl`. Games die in de
+US-store niet te koop zijn maar elders wel, worden via hun eigen regio
+opgenomen en bijgehouden in `us_region_blocked.json` (prijs in de valuta
+van die regio). Hoe dat allemaal precies werkt staat in
+[Hoe de afhandeling werkt](#hoe-de-afhandeling-werkt-blacklist-duplicates-en-us_region_blocked)
+hieronder.
 
 ## Gebruik
 
@@ -138,6 +143,7 @@ extra packages, geen venv.
 | `games_extra_info.jsonl` | extra info (was `player_history.jsonl`): per run een momentopname per game, doorlopend genummerd per game vanaf `<appid>_1` (`_2`, `_3`, ...) |
 | `blacklist.json`   | appids die niet opnieuw worden geprobeerd (niet-game / geen storepagina / geblokkeerd / handmatig), met reden en datum |
 | `duplicates.jsonl` | dubbele titels, per appid 1×, met `duplicate_of` = behouden appid |
+| `us_region_blocked.json` | games die in de US-store niet te koop zijn maar elders wel (via hun eigen regio opgenomen in `games.jsonl`), met `{name, cc, currency, added}` |
 
 > 🔁 2026-09-05: `player_history.jsonl`/`player_history.csv` heten nu
 > `games_extra_info.jsonl`/`games_extra_info.csv`, en de per-game nummering
@@ -146,6 +152,76 @@ extra packages, geen venv.
 `data/` hoort **bewust bij de repo** en staat **niet** in `.gitignore` — de
 data wordt mee gecommit. Daarom staat de API key er ook niet in: die leeft
 encoded buiten de repo (zie "Eerste doorgang" hierboven).
+
+## Hoe de afhandeling werkt: blacklist, duplicates en us_region_blocked
+
+`fetch_games_initial.py` verwerkt elke 'nieuwe' appid (uit de officiële
+app-lijst, nog niet in `games.jsonl`). Alleen echte games (`type == "game"`)
+worden opgeslagen; de rest wordt als volgt afgehandeld.
+
+### Appid zonder US-storepagina (`success:false` op `cc=us`)
+
+1. **Bestaat de game in een andere regio?** Het script checkt
+   `REGION_FALLBACKS` (standaard `cc=nl`):
+   - **Ja, én dezelfde titel staat nog niet in de master** → de game wordt
+     via die regio opgehaald en **gewoon opgenomen** in `games.jsonl`. De
+     prijs is dan in de valuta van die regio (bv. **EUR**) — er wordt niets
+     omgerekend. Het appid wordt daarnaast bijgehouden in
+     `us_region_blocked.json`.
+   - **Ja, maar dezelfde titel staat al in de master** → regionaal
+     duplicaat (dezelfde game onder een tweede appid) →
+     `duplicates.jsonl` met `duplicate_of`.
+2. **Bestaat de game nergens?** Dan is het meestal een *legacy-duplicaat*:
+   een oud/regio-appid uit de officiële lijst zonder eigen pagina (bv. Max
+   Payne `201330` verwijst door naar de echte `12140`). Matcht zijn naam
+   een game in de master → `duplicates.jsonl` met `duplicate_of`.
+3. **Anders** → echt verwijderd/verdwenen → `blacklist.json` met reden
+   `no_store_page`.
+
+Een netwerkfout (geen antwoord van Steam) leidt **nooit** tot een blacklist
+of andere classificatie — zo'n appid blijft 'nieuw' en wordt de volgende
+run opnieuw geprobeerd.
+
+### `blacklist.json`
+
+Appids die bewust **niet (opnieuw)** worden opgehaald, met reden:
+
+- `not_game:<type>` — geen game (dlc/demo/muziek/software/...)
+- `no_store_page` — bestaat (niet meer) als storepagina
+- `manual` — zelf toegevoegd met `--blacklist-add`
+
+Beheer: `--blacklist-show`, `--blacklist-add`, `--blacklist-remove` of het
+bestand bewerken — een appid eruit halen maakt hem weer 'nieuw'.
+
+### `duplicates.jsonl`
+
+Appids waarvan de titel al door een andere game in de master wordt gedekt
+(dubbele/regionale edities én legacy-appids zonder eigen pagina). Eén regel
+per appid, met `duplicate_of` = het appid dat in de master is gehouden
+(doorgaans het laagste). Zo komt een titel nooit twee keer voor. Een regel
+verwijderen maakt dat appid weer 'nieuw' — maar als dezelfde titel nog
+steeds in de master staat, wordt het bij de volgende run gewoon opnieuw als
+duplicaat geregistreerd.
+
+### `us_region_blocked.json`
+
+Games die in de **US-store niet te koop** zijn maar elders wel. Ze staan
+wél in `games.jsonl` (opgehaald via hun eigen regio, in de valuta van die
+regio), en dit bestand houdt bij wélke regio/valuta dat was:
+`{appid: {name, cc, currency, added}}`. `fetch_new_game_info.py` gebruikt
+die `cc` om zulke games bij het pollen óók via hun eigen regio op te halen
+(anders zouden ze als 'geen pagina' worden overgeslagen). Vuistregel: elk
+record in `games.jsonl` met een niet-USD-prijs hoort hierin te staan — het
+script waarschuwt bij de start als dat niet klopt.
+
+### Herstarten
+
+Blacklist, duplicates en us_region_blocked zijn afgeleid van de master en
+de huidige Steam-state. Daarom wist `--reset` ze **samen** met
+`games.jsonl`: bij een volledige herstart worden ze (vrijwel) hetzelfde
+opnieuw opgebouwd — behalve als Steam intussen iets aan zo'n game heeft
+aangepast (pagina toegevoegd/verwijderd, naam of regio-beschikbaarheid
+gewijzigd).
 
 ## Visualisatie (`viz/` — HTML-app, Backgrounds-stijl)
 
