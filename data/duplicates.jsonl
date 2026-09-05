@@ -3,3 +3,4 @@
 {"appid": 201330, "name": "Max Payne", "duplicate_of": 12140, "reason": "no_store_page"}
 {"appid": 202570, "name": "Max Payne", "duplicate_of": 12140, "reason": "no_store_page"}
 {"appid": 217980, "name": "Dishonored", "duplicate_of": 205100, "reason": "no_store_page"}
+{"appid": 275490, "type": "game", "name": "Canyon Capers", "is_free": false, "price_overview": {"currency": "USD", "initial": 699, "final": 699, "discount_percent": 0, "initial_formatted": "$6.99", "final_formatted": "$6.99"}, "publishers": ["Sunset Sugar Studios"], "genres": ["Action", "Casual", "Indie"], "categories": ["Single-player", "Steam Achievements", "Full controller support", "Steam Trading Cards", "Steam Cloud", "Stats", "Steam Leaderboards", "Family Sharing"], "release_date": "Apr 25, 2014", "release_date_format": "2014-04-25", "recommendations_total": null, "duplicate_of": 274580}
