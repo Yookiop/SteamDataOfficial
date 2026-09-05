@@ -1,14 +1,14 @@
-# Nachtelijke Steam-data-run (fetch_games_initial.py + fetch_new_game_info.py)
+# Steam-data-run: bulk-catalogus + extra info
 #
-# Draait elke nacht om 03:00 UTC:
-#   1. fetch_games_initial.py --limit 3500 : tot 3500 NIEUWE games toevoegen
-#      aan data/games.jsonl. Heeft de API key nodig -> secret STEAM_API_KEY;
-#      zonder secret wordt deze stap overgeslagen.
-#   2. fetch_new_game_info.py --limit 3500 --random : willekeurige steekproef
-#      van 3500 games pollen naar data/games_extra_info.jsonl (+ reviews
-#      bijwerken in data/games.jsonl).
-# Daarna worden de gewijzigde data-bestanden automatisch teruggecommit naar
-# main.
+#  1. fetch_games_initial.py (ZONDER --limit): alle nog onbekende appids uit
+#     de officiele app-lijst verwerken tot games.jsonl compleet is. De job-
+#     limiet is 6 uur, dus deze stap committed en pusht ELKE 5 MINUTEN een
+#     checkpoint (data/). Wordt de job na 6 uur afgebroken, dan staat de
+#     voortgang al op GitHub en pakt een volgende (handmatige) run gewoon
+#     verder op. Zodra alles doorlopen is, is deze stap in een paar minuten
+#     klaar ("geen nieuwe games") en loopt de rest gewoon door.
+#  2. fetch_new_game_info.py --limit 50 --random: extra momentopnamen +
+#     reviews (data/games_extra_info.jsonl + reviews bijwerken games.jsonl).
 #
 # Vereist: GitHub Secret "STEAM_API_KEY" (repo Settings > Secrets and
 # variables > Actions) met je Steam Web API key
@@ -53,17 +53,55 @@ jobs:
           python-version: "3.12"
 
       # Nieuwe games toevoegen via de keyed Web API (heeft de API key nodig).
-      # De key komt uit de job-level env (job.env hierboven) en wordt alleen
-      # via "$STEAM_API_KEY" gebruikt (GitHub maskeert de waarde in de logs)
-      # en komt nooit in de repo. Staat de secret niet in de repo, dan is de
-      # env-var leeg -> deze stap wordt overgeslagen en alleen de
-      # extra-info-run draait.
-      - name: Nieuwe games ophalen
+      # ZONDER --limit -> duurt langer dan de job-limiet, dus wordt er elke
+      # 5 minuten een checkpoint gecommit + gepusht (data/). Zo overleeft
+      # een afgebroken run (6u-limiet) en kun je elke checkpoint op GitHub
+      # zien; een herstart pakt op waar de laatste checkpoint stopte. De
+      # live voortgang staat in de Actions-log (heartbeat + logregels).
+      - name: Nieuwe games ophalen (bulk, checkpoints om de 5 min)
         if: ${{ env.STEAM_API_KEY != '' }}
-        run: python fetch_games_initial.py --limit 50 --key "$STEAM_API_KEY"
+        shell: bash
+        run: |
+          set -u
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          commit_checkpoint() {
+            git add data/
+            if git diff --cached --quiet; then
+              echo "[$(date -u +'%H:%M:%S')] geen nieuwe wijzigingen"
+            else
+              git commit -q -m "data: checkpoint fetch_games_initial (UTC $(date -u +'%Y-%m-%d %H:%M'))"
+              if git push -q origin HEAD:main; then
+                echo "[$(date -u +'%H:%M:%S')] checkpoint gecommit + gepusht"
+              else
+                echo "[$(date -u +'%H:%M:%S')] push mislukt - volgende checkpoint probeert opnieuw"
+              fi
+            fi
+          }
+
+          echo "> fetch_games_initial.py (zonder --limit) starten in de achtergrond..."
+          python fetch_games_initial.py --key "$STEAM_API_KEY" > fetch.log 2>&1 &
+          PID=$!
+
+          while kill -0 "$PID" 2>/dev/null; do
+            sleep 300          # checkpoint om de 5 minuten
+            commit_checkpoint
+            echo "--- laatste regels fetch.log ---"
+            tail -n 3 fetch.log
+          done
+          wait "$PID"
+          status=$?
+          commit_checkpoint
+          echo "> fetch_games_initial.py klaar (exit $status). Laatste regels fetch.log:"
+          tail -n 5 fetch.log
+          if [ "$status" -ne 0 ]; then
+            echo "! fetch_games_initial.py eindigde met een fout - zie fetch.log hierboven."
+            exit "$status"
+          fi
 
       - name: Extra info per game
-        run: python fetch_new_game_info.py --limit 50 --random
+        run: python fetch_new_game_info.py --limit 25000 --random
 
       - name: Commit data changes
         run: |
