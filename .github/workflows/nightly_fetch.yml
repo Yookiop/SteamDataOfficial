@@ -37,6 +37,12 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 360 # max. looptijd van een GitHub-hosted job
+    # De API key als job-level env-var: de `secrets`-context mag NIET in een
+    # `if:`-conditie (GitHub-fout "Unrecognized named-value: 'secrets'"),
+    # maar wél in `env`. Via env.STEAM_API_KEY kan de stap tóch
+    # conditioneel draaien. Zonder secret is de waarde leeg -> stap skipped.
+    env:
+      STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,14 +53,13 @@ jobs:
           python-version: "3.12"
 
       # Nieuwe games toevoegen via de keyed Web API (heeft de API key nodig).
-      # De key wordt alleen via env doorgegeven (niet als los argument in de
-      # logregel; GitHub maskeert de waarde) en komt nooit in de repo. Staat
-      # de secret niet in de repo, dan wordt deze stap overgeslagen en draait
-      # alleen de extra-info-run.
+      # De key komt uit de job-level env (job.env hierboven) en wordt alleen
+      # via "$STEAM_API_KEY" gebruikt (GitHub maskeert de waarde in de logs)
+      # en komt nooit in de repo. Staat de secret niet in de repo, dan is de
+      # env-var leeg -> deze stap wordt overgeslagen en alleen de
+      # extra-info-run draait.
       - name: Nieuwe games ophalen (fetch_games_initial.py, limit 3500)
-        if: ${{ secrets.STEAM_API_KEY != '' }}
-        env:
-          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+        if: ${{ env.STEAM_API_KEY != '' }}
         run: python fetch_games_initial.py --limit 3500 --key "$STEAM_API_KEY"
 
       - name: Extra info per game (fetch_new_game_info.py, limit 3500, random)
