@@ -2,8 +2,10 @@
     "python-envs.pythonProjects": [
         {
             "path": ".",
-            "envManager": "ms-python.python:venv",
+            "envManager": "ms-python.python:system",
             "packageManager": "ms-python.python:pip"
         }
     ]
+    // Geen venv meer in deze repo (fetch-scripts en viz zijn stdlib/HTML-only):
+    // de python-envs.pythonProjects-venv-config is verwijderd (2026-09-05).
 }
