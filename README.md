@@ -102,12 +102,6 @@ python fetch_games_initial.py                 # popup voor de API key (wordt daa
 python fetch_games_initial.py --key <key>     # key meegeven (wordt ook automatisch bewaard)
 python fetch_games_initial.py --forget-key    # bewaarde key wissen
 python fetch_games_initial.py --limit 500     # max. 500 nieuwe appids deze run
-python fetch_games_initial.py --report-only   # alleen tonen welke nieuw zijn
-python fetch_games_initial.py --reset         # games/blacklist/duplicates.jsonl wissen
-python fetch_games_initial.py --blacklist-show            # blacklist tonen
-python fetch_games_initial.py --blacklist-add 100 200     # zelf toevoegen
-python fetch_games_initial.py --blacklist-remove 100      # eruit halen -> weer 'nieuw'
-python fetch_games_initial.py --no-reviews                # review-samenvatting overslaan
 ```
 
 🔑 De API key hoef je maar **één keer** in te voeren (popup, of via

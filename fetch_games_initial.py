@@ -37,29 +37,55 @@ volgende run gewoon weer op waar games.jsonl gebleven was - er is GEEN apart
 checkpoint-bestand; het aantal regels in games.jsonl is de waarheid.
 
 Prijzen: elke game wordt opgevraagd met cc=us + l=english, dus price_overview
-is altijd USD en de tekst (genres/categorieen) altijd Engels - er wordt niets
-omgerekend, alleen bewaard wat de API teruggeeft. Bij geen korting laat
-Steam initial_formatted leeg; dan wordt hij gelijkgezet aan final_formatted
-(hetzelfde bedrag).
+is standaard USD en de tekst (genres/categorieen) altijd Engels - er wordt
+niets omgerekend, alleen bewaard wat de API teruggeeft. Bij geen korting
+laat Steam initial_formatted leeg; dan wordt hij gelijkgezet aan
+final_formatted (hetzelfde bedrag). UITZONDERING: us_region_blocked-games
+(alleen elders te koop, zie Filter) worden via hun eigen regio opgehaald -
+hun price_overview heeft dan de valuta van die regio (bv. EUR voor nl) en
+ze staan in us_region_blocked.json.
 
 Filter: alleen type == "game" wordt opgeslagen. Apps die geen game zijn
-(dlc, demo, muziek, software, ...) of geen storepagina hebben (verwijderd/
-geblokkeerd) worden NIET opgeslagen maar automatisch in de blacklist gezet
-(data/blacklist.json): die appids worden bij een volgende run niet meer
-opgehaald. De blacklist blijft beheersbaar - een appid eruit halen (via
+(dlc, demo, muziek, software, ...) worden automatisch in de blacklist gezet
+(data/blacklist.json). Een appid ZONDER US-storepagina (echte success:false
+op cc=us) wordt als volgt geclassificeerd:
+  1. Bestaat de game in een andere regio (REGION_FALLBACKS, default cc=nl)?
+     Dan wordt hij GEWOON OPGENOMEN in games.jsonl, opgehaald via die regio
+     (cc=nl -> price_overview in EUR; er wordt niets omgerekend - de valuta
+     is wat de API teruggeeft) en bijgehouden in data/us_region_blocked.json
+     ({appid: {name, cc, currency, added}}). Records met een niet-USD-prijs
+     horen daar dus ook altijd in te staan (startcontrole van de run). Alleen
+     als dezelfde titel al in de master staat (regionaal duplicaat van een
+     bekende game, bv. IL-2 Dover 63970 -> 63950), wordt hij NIET toegevoegd
+     maar als duplicate_of bewaard in duplicates.jsonl.
+  2. Bestaat hij nergens en matcht zijn naam (uit de officiele app-lijst)
+     een game die al in de master staat? Dan is het een legacy-duplicaat
+     (oud/regio-appid zonder eigen pagina, bv. Max Payne 201330 -> 12140)
+     -> bewaard in duplicates.jsonl met duplicate_of = het bestaande appid
+     (NIET in de blacklist).
+  3. Anders (echt verwijderd/verdwenen) -> blacklist-reden 'no_store_page'.
+De blacklist blijft beheersbaar - een appid eruit halen (via
 --blacklist-remove of het bestand) maakt hem weer 'nieuw'; zelf toevoegen
 kan via --blacklist-add of handmatig in het bestand. Alleen tijdelijke
 fouten (netwerk/429) worden NIET geblacklist - die probeert een volgende
 run gewoon opnieuw. Een titel wordt nooit twee keer toegevoegd: komt
-dezelfde naam nog eens voor (China/regio-editie, heruitgave), dan wordt die
-bewaard in duplicates.jsonl met duplicate_of = het behouden (laagste) appid.
+dezelfde naam nog eens voor (China/regio-editie, heruitgave of een
+no-store-duplicaat), dan wordt die bewaard in duplicates.jsonl met
+duplicate_of = het behouden appid.
 
 Output (in data/):
-    games.jsonl       1 JSON-object per regel, alleen games (type == "game")
-    blacklist.json    appids die NIET opnieuw worden geprobeerd (niet-game,
-                      geen storepagina, geblokkeerd of handmatig). Zelf
-                      beheerbaar: eruit halen = weer 'nieuw'
-    duplicates.jsonl  dubbele titels, per appid 1x, met duplicate_of
+    games.jsonl            1 JSON-object per regel, alleen games (type == "game")
+    blacklist.json         appids die NIET opnieuw worden geprobeerd
+                          (niet-game, no_store_page of handmatig). Zelf
+                          beheerbaar: eruit halen = weer 'nieuw'
+    duplicates.jsonl       duplicaten (zelfde titel als een game in de master;
+                          ook no-store-appids zonder eigen pagina, bv. oude
+                          appids die naar de echte app redirecten), per
+                          appid 1x, met duplicate_of
+    us_region_blocked.json games die in de US-store NIET te koop zijn maar
+                          elders wel (opgenomen in games.jsonl via hun eigen
+                          regio; valuta bv. EUR). {appid: {name, cc,
+                          currency, added}}
 
 Velden per game (slank formaat): appid, type, name, is_free, price_overview,
 publishers, genres (namen), categories (namen), release_date (zoals de API
@@ -123,6 +149,14 @@ STORE_BATCH = 1     # appids per storefront-request. appdetails accepteert
                     # maar EEN appid per request (geverifieerd 2026-09-04:
                     # meerdere herhaalde appids gaven alleen de laatste
                     # terug, 100 gaf HTTP 400) -> dus 1 request per appid.
+
+# Regiocheck bij een appid zonder US-storepagina (echte success:false op
+# cc=us): in deze regio's wordt de game alsnog gezocht (find_fallback_region).
+# Wordt hij daar gevonden, dan wordt hij OPGENOMEN in games.jsonl via die
+# regio (de valuta is dan die van die regio, bv. EUR voor nl - er wordt
+# niets omgerekend) en bijgehouden in us_region_blocked.json.
+REGION_FALLBACKS = ("nl",)
+US_BLOCKED_FILE = "us_region_blocked.json"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -435,6 +469,78 @@ def blacklist_add(blacklist, aid, name, reason):
     return True
 
 
+def load_us_region_blocked(data_dir):
+    """Lees us_region_blocked.json: games die in de US-store niet te koop
+    zijn maar elders wel (opgenomen in games.jsonl via hun eigen regio).
+    Formaat als blacklist: {appid: {name, cc, currency, added}} (ints)."""
+    path = os.path.join(data_dir, US_BLOCKED_FILE)
+    blocked = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                obj = json.load(f)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                try:
+                    blocked[int(k)] = v
+                except (TypeError, ValueError):
+                    pass
+    return blocked
+
+
+def save_us_region_blocked(data_dir, blocked):
+    """Schrijf us_region_blocked.json (gesorteerd op appid) weg."""
+    ordered = {str(aid): blocked[aid] for aid in sorted(blocked)}
+    path = os.path.join(data_dir, US_BLOCKED_FILE)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(ordered, f, ensure_ascii=False, indent=1)
+
+
+def us_blocked_add(blocked, aid, name, cc, currency):
+    """Voeg een appid toe aan de (in-memory) us_region_blocked-registratie;
+    retourneert True als hij nieuw was."""
+    if aid in blocked:
+        return False
+    blocked[aid] = {"name": name, "cc": cc, "currency": currency,
+                    "added": now_iso()}
+    return True
+
+
+def check_non_usd_tracking(master_path, us_blocked):
+    """Startcontrole: elk games.jsonl-record met een prijs in een NIET-USD-
+    valuta moet in us_region_blocked.json staan (dat is de enige manier
+    waarop zo'n record ontstaat). Waarschuwt ook over tracking-entries die
+    niet (meer) in de master staan."""
+    untracked, known = [], set()
+    if os.path.isfile(master_path):
+        for line in open(master_path, encoding="utf-8"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+                aid = int(r.get("appid"))
+            except (TypeError, ValueError):
+                continue
+            known.add(aid)
+            cur = (r.get("price_overview") or {}).get("currency")
+            if cur and cur != "USD" and aid not in us_blocked:
+                untracked.append((aid, r.get("name"), cur))
+    if untracked:
+        print(f"! Waarschuwing: niet-USD-records zonder {US_BLOCKED_FILE}-"
+              "tracking:")
+        for aid, name, cur in untracked:
+            print(f"    {aid}  {name}  ({cur})")
+    orphans = [a for a in sorted(us_blocked) if a not in known]
+    if orphans:
+        print(f"! Waarschuwing: {US_BLOCKED_FILE} bevat appids die niet in "
+              "games.jsonl staan:")
+        for aid in orphans:
+            print(f"    {aid}  {us_blocked[aid].get('name')}")
+
+
 # --------------------------------------------------------------------------- #
 #  Records (slank formaat)                                                     #
 # --------------------------------------------------------------------------- #
@@ -588,13 +694,34 @@ def fetch_review_summary(appid, timeout=30):
     return None
 
 
+def enrich_live(record, aid, args, stats):
+    """Vul een slank record aan met last_seen_player_count en de
+    review-samenvatting (beide keyless, robuust). Gebruikt door de gewone
+    toevoeging EN de us_region_blocked-toevoeging (via een andere regio)."""
+    pc = fetch_player_count(aid, args.timeout)
+    stats["requests"] += 1
+    record["last_seen_player_count"] = pc
+    if args.no_reviews:
+        rev = None
+    else:
+        rev = fetch_review_summary(aid, args.timeout)
+        stats["requests"] += 1
+    for key in ("review_score", "review_score_desc",
+                "review_positive", "review_negative",
+                "review_total"):
+        record[key] = (rev or {}).get(key)
+    return pc
+
+
 # --------------------------------------------------------------------------- #
-#  Storefront ophalen (batches, USD)                                           #
+#  Storefront ophalen (per regio; standaard USD)                               #
 # --------------------------------------------------------------------------- #
-def fetch_store_batch(appids, args, stats):
+def fetch_store_batch(appids, args, stats, cc="us"):
     """Haal een batch appids op in EEN storefront-request (STORE_BATCH per
-    request, cc=us + l=english -> USD/Engels) met retry/backoff op het hele
-    request. Retourneert voor elk appid een (appid, outcome, info)-tuple:
+    request, l=english; standaard cc=us -> USD/Engels, maar de caller kan een
+    andere regio meegeven, bv. 'nl' voor us_region_blocked-games -> EUR) met
+    retry/backoff op het hele request. Retourneert voor elk appid een
+    (appid, outcome, info)-tuple:
       'game'    -> info = het slanke record
       'other'   -> info = {"name":..,"type":..}
       'skipped' -> info = {"name":None,"reason":..} (geen storepagina)
@@ -607,10 +734,10 @@ def fetch_store_batch(appids, args, stats):
         stats["requests"] += 1
         try:
             url = APP_DETAILS_URL + "?" + urllib.parse.urlencode(
-                # cc=us + l=english: voorkomt willekeurige valuta/taal per
+                # cc + l=english: voorkomt willekeurige valuta/taal per
                 # request (de store-API kiest anders zelf een regio/edge).
                 {"appids": [str(a) for a in appids],
-                 "cc": "us", "l": "english"}, doseq=True)
+                 "cc": cc, "l": "english"}, doseq=True)
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(req, timeout=args.timeout) as resp:
                 body = resp.read()
@@ -654,7 +781,9 @@ def fetch_store_batch(appids, args, stats):
                     continue
                 if not entry.get("success"):
                     # Alleen een ECHTE success:false (het appid staat in de
-                    # response maar heeft geen storepagina) -> blacklisten.
+                    # response maar heeft geen US-storepagina) -> 'skipped';
+                    # de caller classificeert verder (regio/duplicaat/
+                    # no_store_page) i.p.v. blind te blacklisten.
                     results.append((aid, "skipped",
                                     {"name": None, "reason": "no_store_page"}))
                     continue
@@ -685,6 +814,69 @@ def fetch_store_batch(appids, args, stats):
             # NIET blacklisten (kan een tijdelijke blokkade zijn).
             return [(aid, "failed", None) for aid in appids]
     return [(aid, "failed", None) for aid in appids]
+
+
+def find_fallback_region(aid, args, stats):
+    """Zoek of de game (success:true) in een fallback-regio bestaat
+    (REGION_FALLBACKS, dus niet-US). Retourneert:
+      cc (str) -> daar te koop (de caller haalt hem via die regio op en
+                  neemt hem op in games.jsonl + us_region_blocked.json),
+      ""       -> ook elders geen pagina (definitief),
+      None     -> request definitief mislukt (netwerk/429) -> dan NIETS
+                  doen; de volgende run probeert het opnieuw."""
+    for cc in REGION_FALLBACKS:
+        for attempt in range(1, args.max_retries + 1):
+            if stop_requested:
+                return None
+            stats["requests"] += 1
+            try:
+                url = APP_DETAILS_URL + "?" + urllib.parse.urlencode(
+                    {"appids": aid, "cc": cc, "l": "english"})
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(req,
+                                            timeout=args.timeout) as resp:
+                    body = resp.read()
+                    code = resp.status
+            except urllib.error.HTTPError as e:
+                code = e.code
+            except (urllib.error.URLError, OSError, ValueError):
+                if attempt < args.max_retries:
+                    wait_chunked(backoff_seconds(attempt, 0))
+                    continue
+                return None
+            if code == 200:
+                try:
+                    payload = json.loads(
+                        body.decode("utf-8", errors="replace"))
+                except ValueError:
+                    if attempt < args.max_retries:
+                        wait_chunked(backoff_seconds(attempt, 0))
+                        continue
+                    return None
+                # 200 zonder dit appid = geen normale response -> retry
+                if not isinstance(payload, dict) or str(aid) not in payload:
+                    if attempt < args.max_retries:
+                        wait_chunked(backoff_seconds(attempt, 0))
+                        continue
+                    return None
+                if payload.get(str(aid)).get("success"):
+                    return cc
+                break          # deze regio: geen pagina -> volgende fallback
+            elif code == 429:
+                if attempt >= args.max_retries:
+                    return None
+                if attempt == 1:
+                    print(f"! HTTP 429 bij regiocheck appid {aid} ({cc}) - "
+                          f"pauze {backoff_seconds(attempt, 429):.0f}s...")
+                wait_chunked(backoff_seconds(attempt, 429))
+            elif 500 <= code < 600:
+                if attempt >= args.max_retries:
+                    return None
+                wait_chunked(backoff_seconds(attempt, code))
+            else:
+                return ""      # andere HTTP-fout: geen pagina in deze regio
+    return ""
 
 
 # --------------------------------------------------------------------------- #
@@ -838,15 +1030,18 @@ def main(argv=None):
 
     if args.reset:
         # Opnieuw beginnen: dataset + output wissen (geen checkpoint meer).
-        for name in ("games.jsonl", "blacklist.json", "duplicates.jsonl"):
+        # us_region_blocked.json hoort erbij: die verwijst naar games die
+        # straks niet meer in de master staan.
+        for name in ("games.jsonl", "blacklist.json", "duplicates.jsonl",
+                     "us_region_blocked.json"):
             path = os.path.join(data_dir, name)
             if os.path.isfile(path):
                 os.remove(path)
         if os.path.abspath(out_path) != os.path.join(data_dir, "games.jsonl") \
                 and os.path.isfile(out_path):
             os.remove(out_path)
-        print("> Reset: games/blacklist/duplicates.jsonl gewist - "
-              "begint opnieuw vanaf het begin van de app-lijst")
+        print("> Reset: games/blacklist/duplicates/us_region_blocked.json "
+              "gewist - begint opnieuw vanaf het begin van de app-lijst")
 
     key = resolve_api_key(args)
 
@@ -881,13 +1076,20 @@ def main(argv=None):
 
     known_appids, known_titles, title_appid = load_existing(out_path)
     blacklist = load_blacklist(blacklist_path)
+    dup_seen = load_duplicate_appids(data_dir)
+    us_blocked = load_us_region_blocked(data_dir)
     new_ids = sorted(aid for aid in api
-                     if aid not in known_appids and aid not in blacklist)
+                     if aid not in known_appids
+                     and aid not in blacklist
+                     and aid not in dup_seen)
 
     print(f"\nTotaal in de API-call          : {len(api)}")
     print(f"Al bekend (in de output)       : {len(known_appids)}")
     print(f"In de blacklist               : {len(blacklist)}")
+    print(f"Al duplicaat (duplicates.jsonl): {len(dup_seen)}")
+    print(f"US-geblokkeerd (elders opgehaald): {len(us_blocked)}")
     print(f"NIEUW (te verwerken)          : {len(new_ids)}")
+    check_non_usd_tracking(out_path, us_blocked)
 
     lim = args.limit or None                # 0 wordt behandeld als 'geen limiet'
     selected = new_ids
@@ -915,9 +1117,9 @@ def main(argv=None):
         return
 
     stats = {"requests": 0, "added": 0, "duplicate": 0, "dup_saved": 0,
-             "other": 0, "skipped": 0, "failed": 0, "blacklisted": 0}
+             "other": 0, "skipped": 0, "failed": 0, "blacklisted": 0,
+             "us_blocked": 0}
     added_titles = set()          # deze run toegevoegd (voorkomt intra-run dubbels)
-    dup_seen = load_duplicate_appids(data_dir)
 
     n_req = (len(selected) + STORE_BATCH - 1) // STORE_BATCH
     print(f"\n> Storefront-data ophalen voor {len(selected)} nieuwe appids "
@@ -927,6 +1129,23 @@ def main(argv=None):
 
     games_file = open(out_path, "a", encoding="utf-8")
     processed = 0
+
+    def save_new_game(info, aid, note=""):
+        """Schrijf een nieuw slank record naar games.jsonl en werk de
+        in-memory known-sets bij. Gebruikt door de gewone toevoeging én de
+        us_region_blocked-toevoeging (via een andere regio/valuta)."""
+        title = (info.get("name") or "").strip().lower()
+        games_file.write(json.dumps(info, ensure_ascii=False) + "\n")
+        games_file.flush()
+        stats["added"] += 1
+        known_appids.add(aid)
+        known_titles.add(title)
+        added_titles.add(title)
+        title_appid.setdefault(title, aid)
+        print(f"   + {aid}  {info.get('name')}  {note}"
+              f"(players: {info.get('last_seen_player_count')}, reviews: "
+              f"{info.get('review_score_desc')})")
+
     try:
         for start in range(0, len(selected), STORE_BATCH):
             if stop_requested:
@@ -955,41 +1174,88 @@ def main(argv=None):
                         # Momenteel spelersaantal (keyless, robuust); dit is
                         # de enige regel van deze game in de basis (geen
                         # appid_amount - die nummering doet de extra-info).
-                        pc = fetch_player_count(aid, args.timeout)
-                        stats["requests"] += 1
-                        info["last_seen_player_count"] = pc
-                        if args.no_reviews:
-                            rev = None
+                        enrich_live(info, aid, args, stats)
+                        save_new_game(info, aid)
+                elif outcome == "other":
+                    stats["other"] += 1
+                    # Geen game (dlc/demo/software/...): afgehandeld -> in de
+                    # blacklist, zodat een volgende run ze niet opnieuw haalt.
+                    reason = f"not_game:{info.get('type')}"
+                    if blacklist_add(blacklist, aid, info.get("name"),
+                                     reason):
+                        stats["blacklisted"] += 1
+                    if stats["blacklisted"] % 50 == 0:
+                        save_blacklist(blacklist_path, blacklist)
+                elif outcome == "skipped":
+                    # Echte success:false op cc=us: geen US-storepagina.
+                    # Classificeren i.p.v. blind blacklisten.
+                    stats["skipped"] += 1
+                    name = info.get("name") or api.get(aid)
+                    title = (name or "").strip().lower()
+                    # 1) Bestaat de game in een andere regio (bv. cc=nl)?
+                    cc_found = find_fallback_region(aid, args, stats)
+                    if cc_found is None:      # netwerkfout bij de check ->
+                        stats["failed"] += 1  # NIETS doen; volgende run
+                        continue               # probeert het opnieuw.
+                    if cc_found:
+                        # 1a) Titel al in de master? Dan is het een regionaal
+                        #     duplicaat van een bekende game (bv. IL-2 Dover
+                        #     63970 -> 63950) -> duplicate_of, niet toevoegen.
+                        canon = title_appid.get(title) if title else None
+                        if canon is not None:
+                            stats["duplicate"] += 1
+                            dup_record = {"appid": aid, "name": name,
+                                          "duplicate_of": canon,
+                                          "reason": "us_region_blocked"}
+                            if append_duplicates(data_dir, [dup_record],
+                                                 dup_seen):
+                                stats["dup_saved"] += 1
+                            continue
+                        # 1b) Elders te koop + titel nog niet in de master:
+                        #     opnemen via die regio (eigen valuta, bv. EUR)
+                        #     én registreren in us_region_blocked.json.
+                        res = fetch_store_batch([aid], args, stats,
+                                                cc=cc_found)
+                        if res is None:        # onderbroken (Ctrl+C)
+                            break
+                        o2, i2 = res[0][1], res[0][2]
+                        if o2 == "game":
+                            enrich_live(i2, aid, args, stats)
+                            currency = ((i2.get("price_overview") or {})
+                                        .get("currency"))
+                            if us_blocked_add(us_blocked, aid,
+                                              i2.get("name"), cc_found,
+                                              currency):
+                                stats["us_blocked"] += 1
+                            save_new_game(
+                                i2, aid,
+                                f"(US-geblokkeerd -> {cc_found}/"
+                                f"{currency}) ")
+                        elif o2 == "other":
+                            stats["other"] += 1
+                            reason = f"not_game:{i2.get('type')}"
+                            if blacklist_add(blacklist, aid, i2.get("name"),
+                                             reason):
+                                stats["blacklisted"] += 1
                         else:
-                            rev = fetch_review_summary(aid, args.timeout)
-                            stats["requests"] += 1
-                        for key in ("review_score", "review_score_desc",
-                                    "review_positive", "review_negative",
-                                    "review_total"):
-                            info[key] = (rev or {}).get(key)
-                        games_file.write(
-                            json.dumps(info, ensure_ascii=False) + "\n")
-                        games_file.flush()
-                        stats["added"] += 1
-                        known_appids.add(aid)
-                        known_titles.add(title)
-                        added_titles.add(title)
-                        title_appid.setdefault(title, aid)
-                        print(f"   + {aid}  {info.get('name')}  "
-                              f"(players: {pc}, reviews: "
-                              f"{info.get('review_score_desc')})")
-                elif outcome in ("other", "skipped"):
-                    stats[outcome] += 1
-                    # Geen game / geen storepagina / geblokkeerd: afgehandeld
-                    # -> in de blacklist, zodat een volgende run ze niet
-                    # opnieuw ophaalt. De gebruiker kan ze er later uithalen.
-                    if outcome == "other":
-                        reason = f"not_game:{info.get('type')}"
-                        name = info.get("name")
-                    else:
-                        reason = info.get("reason")
-                        name = info.get("name") or api.get(aid)
-                    if blacklist_add(blacklist, aid, name, reason):
+                            stats["failed"] += 1
+                        continue
+                    # 2) Bestaat nergens én matcht zijn naam (uit de app-lijst)
+                    #    een game in de master? Dan is het een legacy-
+                    #    duplicaat zonder eigen pagina (bv. Max Payne
+                    #    201330 -> 12140) -> duplicates.jsonl i.p.v. blacklist.
+                    canon = title_appid.get(title) if title else None
+                    if canon is not None:
+                        stats["duplicate"] += 1
+                        dup_record = {"appid": aid, "name": name,
+                                      "duplicate_of": canon,
+                                      "reason": "no_store_page"}
+                        if append_duplicates(data_dir, [dup_record],
+                                             dup_seen):
+                            stats["dup_saved"] += 1
+                        continue
+                    # 3) Echt verwijderd/verdwenen -> blacklist.
+                    if blacklist_add(blacklist, aid, name, "no_store_page"):
                         stats["blacklisted"] += 1
                     if stats["blacklisted"] % 50 == 0:
                         save_blacklist(blacklist_path, blacklist)
@@ -1015,18 +1281,21 @@ def main(argv=None):
         games_file.close()
         if stats["blacklisted"]:
             save_blacklist(blacklist_path, blacklist)
+        if stats["us_blocked"]:
+            save_us_region_blocked(data_dir, us_blocked)
 
-    remaining_new = (len(new_ids) - stats["added"] - stats["blacklisted"])
+    remaining_new = (len(new_ids) - stats["added"] - stats["blacklisted"]
+                     - stats["duplicate"])
     print("\n=== Samenvatting ===")
     print(f"Appids verwerkt deze run     : {processed}")
     print(f"Requests (store-API)         : {stats['requests']}")
-    print(f"Nieuwe games toegevoegd      : {stats['added']}")
+    print(f"Nieuwe games toegevoegd      : {stats['added']}   "
+          f"(waarvan us_region_blocked: {stats['us_blocked']})")
     print(f"Totaal in games.jsonl        : {len(known_appids)}")
-    print(f"Dubbele titel overgeslagen   : {stats['duplicate']}   "
-          f"(zelfde naam stond er al in; {stats['dup_saved']} bewaard in "
-          f"duplicates.jsonl)")
+    print(f"Duplicaten (duplicates.jsonl): {stats['duplicate']}   "
+          f"({stats['dup_saved']} nieuw bewaard; de rest stond er al in)")
     print(f"In de blacklist gezet        : {stats['blacklisted']}   "
-          f"(niet-game {stats['other']} + geen storepagina/geblokkeerd "
+          f"(niet-game {stats['other']} + no_store_page "
           f"{stats['skipped']})")
     print(f"Failed (netwerk/429)         : {stats['failed']}   "
           "(volgende run probeert ze vanzelf opnieuw)")

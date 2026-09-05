@@ -20,7 +20,9 @@ review_*-velden. Zonder netwerk kan dat ook los: --sync-reviews.
 
 Per game per run (games met de MEESTE spelers eerst, daarna aflopend):
   1. Dezelfde slanke velden als fetch_games_initial (vers opgehaald uit de
-     officiele Storefront API, cc=us + l=english -> USD).
+     officiele Storefront API, cc=us + l=english -> USD; us_region_blocked-
+     games die in de US-store niet te koop zijn worden via hun eigen regio
+     opgehaald -> de valuta is dan die van die regio, bv. EUR voor nl).
   2. last_seen_player_count (momentopname, keyless via
      ISteamUserStats/GetNumberOfCurrentPlayers; None bij geen publieke data).
   3. De review-samenvatting (officiele Review API
@@ -210,17 +212,42 @@ def random_jitter(jitter):
     return random.uniform(0, jitter)
 
 
-def fetch_store_record(appid, args, stats):
-    """Storefront appdetails voor EEN appid met retry/backoff.
-    Retourneert een slank record, of None als de game (nu) geen storepagina
-    is of het request na alle pogingen mislukte."""
+def load_us_region_blocked(data_dir):
+    """Lees us_region_blocked.json (uit fetch_games_initial): games die in
+    de US-store niet te koop zijn maar elders wel, opgenomen in de master
+    via hun eigen regio. Formaat: {appid: {name, cc, currency, added}} met
+    ints als sleutels. Deze games pollen we via hun eigen cc (bv. nl ->
+    EUR) in plaats van cc=us."""
+    path = os.path.join(data_dir, "us_region_blocked.json")
+    blocked = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                obj = json.load(f)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                try:
+                    blocked[int(k)] = v
+                except (TypeError, ValueError):
+                    pass
+    return blocked
+
+
+def fetch_store_record(appid, args, stats, cc="us"):
+    """Storefront appdetails voor EEN appid met retry/backoff. Standaard
+    cc=us (USD), maar voor us_region_blocked-games geeft de caller hun eigen
+    regio mee (bv. cc='nl' -> EUR). Retourneert een slank record, of None
+    als de game (nu) geen storepagina heeft of het request na alle pogingen
+    mislukte."""
     for attempt in range(1, args.max_retries + 1):
         if stop_requested:
             return None
         stats["requests"] += 1
         try:
             url = APP_DETAILS_URL + "?" + urllib.parse.urlencode(
-                {"appids": appid, "cc": "us", "l": "english"})
+                {"appids": appid, "cc": cc, "l": "english"})
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(req, timeout=args.timeout) as resp:
                 body = resp.read()
@@ -469,6 +496,7 @@ def main(argv=None):
               "fetch_games_initial.py om de masterlijst op te bouwen.")
         sys.exit(1)
     extra_counts, extra_last, latest_reviews = load_extra_info(extra_path)
+    us_blocked = load_us_region_blocked(data_dir)
 
     # --sync-reviews: de basis (games.jsonl, 1 record per game) bijwerken
     # met de laatst bekende reviews uit de momentopnamen en stoppen.
@@ -548,7 +576,11 @@ def main(argv=None):
                       "bereikt. Draai het script opnieuw om verder te gaan.")
                 break
 
-            record = fetch_store_record(aid, args, stats)
+            cc = "us"
+            _blk = us_blocked.get(aid)
+            if _blk and _blk.get("cc"):
+                cc = _blk["cc"]
+            record = fetch_store_record(aid, args, stats, cc=cc)
             if stop_requested:
                 break
             if record is None:
@@ -605,10 +637,8 @@ def main(argv=None):
 
     print("\n=== Samenvatting ===")
     print(f"Games verwerkt deze run     : {processed}")
-    print(f"Requests deze run           : {stats['requests']}")
     print(f"Extra-info-regels toegevoegd: {stats['added']}")
     print(f"Overgeslagen (geen pagina)  : {stats['skipped']}")
-    print(f"Output                      : {extra_path}")
     if len(selected) > processed:
         print(f"\n> {len(selected) - processed} games nog niet aan bod; draai "
               "het script opnieuw voor de volgende.")
