@@ -53,6 +53,7 @@ van games die al in de master staan).
 Gebruik:
     python fetch_new_game_info.py             # alle games pollen (meeste spelers eerst)
     python fetch_new_game_info.py --limit 500 # max. 500 games deze run (populairste eerst)
+    python fetch_new_game_info.py --limit 3500 --random # max. 500 games deze run (populairste eerst)
     python fetch_new_game_info.py --random    # elke run een willekeurige selectie appids,
                                               # zodat niet steeds dezelfde top-games worden
                                               # bijgewerkt (combineerbaar met --limit)

@@ -127,7 +127,7 @@ STORE_BATCH = 1     # appids per storefront-request. appdetails accepteert
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-DEFAULT_MAX_REQUESTS = 10000   # veiligheidslimiet op store-requests per run
+DEFAULT_MAX_REQUESTS = 222222222   # veiligheidslimiet op store-requests per run
 DEFAULT_DELAY = 0.4            # seconden rust tussen twee store-requests
 DEFAULT_JITTER = 0.1           # extra willekeurige spreiding op de pauze
 DEFAULT_TIMEOUT = 30           # timeout per HTTP-call (sec)

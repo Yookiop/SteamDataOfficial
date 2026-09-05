@@ -1,0 +1,73 @@
+# Nachtelijke Steam-data-run (fetch_games_initial.py + fetch_new_game_info.py)
+#
+# Draait elke nacht om 03:00 UTC:
+#   1. fetch_games_initial.py --limit 3500 : tot 3500 NIEUWE games toevoegen
+#      aan data/games.jsonl. Heeft de API key nodig -> secret STEAM_API_KEY;
+#      zonder secret wordt deze stap overgeslagen.
+#   2. fetch_new_game_info.py --limit 3500 --random : willekeurige steekproef
+#      van 3500 games pollen naar data/games_extra_info.jsonl (+ reviews
+#      bijwerken in data/games.jsonl).
+# Daarna worden de gewijzigde data-bestanden automatisch teruggecommit naar
+# main.
+#
+# Vereist: GitHub Secret "STEAM_API_KEY" (repo Settings > Secrets and
+# variables > Actions) met je Steam Web API key
+# (https://steamcommunity.com/dev/apikey).
+#
+# Handmatig starten: Actions > "Nightly fetch new game info" > Run workflow.
+
+name: Nightly fetch new game info
+
+on:
+  schedule:
+    # Elke nacht 03:00 UTC (= 05:00 NL zomertijd / 04:00 NL wintertijd)
+    - cron: "0 3 * * *"
+  workflow_dispatch: # handmatig starten via de Actions-tab
+
+permissions:
+  contents: write # nodig om de data terug te kunnen pushen
+
+# Zorg dat nooit twee runs tegelijk draaien (bijv. handmatig + gepland);
+# een draaiende run wordt niet afgebroken, een nieuwe wacht.
+concurrency:
+  group: nightly-fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # max. looptijd van een GitHub-hosted job
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Nieuwe games toevoegen via de keyed Web API (heeft de API key nodig).
+      # De key wordt alleen via env doorgegeven (niet als los argument in de
+      # logregel; GitHub maskeert de waarde) en komt nooit in de repo. Staat
+      # de secret niet in de repo, dan wordt deze stap overgeslagen en draait
+      # alleen de extra-info-run.
+      - name: Nieuwe games ophalen (fetch_games_initial.py, limit 3500)
+        if: ${{ secrets.STEAM_API_KEY != '' }}
+        env:
+          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+        run: python fetch_games_initial.py --limit 3500 --key "$STEAM_API_KEY"
+
+      - name: Extra info per game (fetch_new_game_info.py, limit 3500, random)
+        run: python fetch_new_game_info.py --limit 3500 --random
+
+      - name: Commit data changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "Geen wijzigingen in data/ - niets te committen."
+          else
+            git commit -m "data: nightly Steam data run (new games + extra info, UTC $(date -u +'%Y-%m-%d %H:%M'))"
+            git push origin HEAD:main
+          fi
