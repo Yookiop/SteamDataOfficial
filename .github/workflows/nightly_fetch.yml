@@ -58,12 +58,12 @@ jobs:
       # en komt nooit in de repo. Staat de secret niet in de repo, dan is de
       # env-var leeg -> deze stap wordt overgeslagen en alleen de
       # extra-info-run draait.
-      - name: Nieuwe games ophalen (fetch_games_initial.py, limit 3500)
+      - name: Nieuwe games ophalen
         if: ${{ env.STEAM_API_KEY != '' }}
-        run: python fetch_games_initial.py --limit 3500 --key "$STEAM_API_KEY"
+        run: python fetch_games_initial.py --limit 50 --key "$STEAM_API_KEY"
 
-      - name: Extra info per game (fetch_new_game_info.py, limit 3500, random)
-        run: python fetch_new_game_info.py --limit 3500 --random
+      - name: Extra info per game
+        run: python fetch_new_game_info.py --limit 50 --random
 
       - name: Commit data changes
         run: |
