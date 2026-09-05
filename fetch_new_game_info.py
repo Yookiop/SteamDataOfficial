@@ -36,10 +36,14 @@ Per game per run (games met de MEESTE spelers eerst, daarna aflopend):
   5. refresh_count = 1 op ELKE regel: zo kun je later per game het aantal
      vernieuwingen optellen (som van refresh_count per appid).
 
-Volgorde: gesorteerd op het LAATST bekende spelersaantal per game (eerst de
-laatste games_extra_info-regel van dat appid, anders de masterwaarde uit
-games.jsonl), aflopend; bij gelijk -> oplopend appid. Zo vernieuwt een run
-met --limit altijd eerst de populairste games.
+Volgorde (zonder --random): gesorteerd op het LAATST bekende spelersaantal
+per game (eerst de laatste games_extra_info-regel van dat appid, anders de
+masterwaarde uit games.jsonl), aflopend; bij gelijk -> oplopend appid. Zo
+vernieuwt een run met --limit altijd eerst de populairste games. Met
+--random wordt de volgorde elke run opnieuw willekeurig gemixt (uniforme
+steekproef): dan blijven niet steeds dezelfde top-games vooraan staan en
+wordt ook een game die ver achteraan staat (bv. op plek 50.000) regelmatig
+bijgewerkt.
 
 Anders dan fetch_games_initial wordt er dus NIET geskipt op bekende appids,
 niet gededuped en niet geblacklist: elke run telt. Geen API key nodig (dit
@@ -49,11 +53,11 @@ van games die al in de master staan).
 Gebruik:
     python fetch_new_game_info.py             # alle games pollen (meeste spelers eerst)
     python fetch_new_game_info.py --limit 500 # max. 500 games deze run (populairste eerst)
-    python fetch_new_game_info.py --report-only   # alleen tonen wat er zou komen
-    python fetch_new_game_info.py --no-reviews    # review-samenvatting overslaan
+    python fetch_new_game_info.py --random    # elke run een willekeurige selectie appids,
+                                              # zodat niet steeds dezelfde top-games worden
+                                              # bijgewerkt (combineerbaar met --limit)
     python fetch_new_game_info.py --sync-reviews  # basis (games.jsonl) bijwerken met de
                                                   # laatst bekende reviews en stoppen
-                                                  # (geen netwerk)
 """
 
 import argparse
@@ -406,6 +410,11 @@ def main(argv=None):
                    help="alleen de basis (games.jsonl) bijwerken met de "
                         "laatst bekende review-samenvatting uit "
                         "games_extra_info.jsonl en stoppen (geen netwerk)")
+    p.add_argument("--random", action="store_true",
+                   help="appids in willekeurige volgorde verwerken i.p.v. "
+                        "meeste spelers eerst (--limit blijft werken): zo "
+                        "worden niet steeds dezelfde populairste games "
+                        "bijgewerkt, maar ook ver achteraan staande games")
     p.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                    help=f"seconden rust tussen twee requests "
                         f"(default: {DEFAULT_DELAY})")
@@ -467,12 +476,21 @@ def main(argv=None):
 
     ordered_ids = sorted(master,
                          key=lambda a: (-order_score(a), a))
+    # --random: de volgorde wordt elke run opnieuw gemixt (uniforme
+    # willekeurige steekproef). Zo blijven niet steeds dezelfde populairste
+    # games vooraan staan en wordt ook iets op plek 50.000 regelmatig
+    # bijgewerkt. Zonder --random: meeste spelers eerst.
+    if args.random:
+        random.shuffle(ordered_ids)
 
     print("\n=== SteamDataOfficial: extra info per game ===")
     print(f"Games in de master          : {len(master)}")
     print(f"Al in games_extra_info.jsonl: "
           f"{sum(extra_counts.values())} regels")
-    print("Volgorde                    : meeste spelers eerst")
+    if args.random:
+        print("Volgorde                    : willekeurig (--random)")
+    else:
+        print("Volgorde                    : meeste spelers eerst")
 
     lim = args.limit or None
     selected = ordered_ids
