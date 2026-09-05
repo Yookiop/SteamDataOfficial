@@ -1,0 +1,6 @@
+# Afhankelijkheden voor de visualisatie-scripts (visualize_games.py).
+# Alleen nodig voor het genereren van grafieken - de fetch-scripts gebruiken
+# uitsluitend de standaardbibliotheek.
+pandas>=2.0.0
+matplotlib>=3.8.0
+pillow>=10.0.0

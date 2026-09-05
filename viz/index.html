@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steam-games visualisatie</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>Steam-games visualisatie</h1>
+  <p class="sub">Grafieken van de data in <code>data/</code> — <span id="dataInfo">laden…</span></p>
+</header>
+
+<main>
+
+  <!-- ===================== Tijdlijn (geanimeerd) ===================== -->
+  <section class="card">
+    <div class="card-head">
+      <h2>Amount of Steam games over time</h2>
+      <span id="recBadge" class="badge" hidden>⏺ Opnemen…</span>
+    </div>
+
+    <div class="canvas-wrap">
+      <canvas id="timelineCanvas" width="1600" height="900"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="playBtn" class="btn" title="Afspelen / pauzeren">▶ Afspelen</button>
+      <button id="restartBtn" class="btn" title="Opnieuw vanaf het begin">⟲ Opnieuw</button>
+
+      <label class="dur" for="durSlider">Duur
+        <input type="range" id="durSlider" min="10" max="120" step="5" value="30">
+        <output id="durVal" for="durSlider">30</output> s
+      </label>
+
+      <span class="colors">
+        <label class="color" for="lineColor">Lijn
+          <input type="color" id="lineColor" value="#66c0f4" title="Kleur van de lijn, het oppervlak en de balken">
+        </label>
+        <label class="color" for="accentColor">Accent
+          <input type="color" id="accentColor" value="#e74c3c" title="Kleur van de stip en de drukste dag">
+        </label>
+      </span>
+
+      <button id="exportBtn" class="btn primary" title="De animatie (één volledige cyclus) opnemen en downloaden als MP4">
+        ⬇ Exporteer MP4
+      </button>
+      <span id="exportStatus" class="status" hidden></span>
+    </div>
+
+    <p class="foot" id="timelineFoot">Laden…</p>
+    <p class="hint">De animatie speelt in real-time af; de MP4-export neemt één volledige cyclus op
+      (houd het tabblad zichtbaar tijdens het opnemen).</p>
+  </section>
+
+  <!-- ===================== Weekday (statisch) ===================== -->
+  <section class="card">
+    <div class="canvas-wrap">
+      <canvas id="weekdayCanvas" width="1200" height="620"></canvas>
+    </div>
+
+    <p class="foot" id="weekdayFoot">Laden…</p>
+  </section>
+
+</main>
+
+<script src="static/app.js"></script>
+</body>
+</html>

@@ -145,6 +145,41 @@ extra packages, geen venv.
 data wordt mee gecommit. Daarom staat de API key er ook niet in: die leeft
 encoded buiten de repo (zie "Eerste doorgang" hierboven).
 
+## Visualisatie (`viz/` — HTML-app, Backgrounds-stijl)
+
+In `viz/` staat een HTML-app die de grafieken van de CSV's in `data/` in de
+browser toont (geen GIF — de animatie speelt live af en je exporteert een
+**MP4**):
+
+- **Amount of Steam games over time** — geanimeerde cumulatieve tijdlijn:
+  het aantal games (appids uit `games.csv`) dat tot elke releasedatum is
+  uitgekomen. De tijdcursor loopt over de hele periode en voegt per release
+  games toe aan de lijn. Bediening: ▶ afspelen/pauzeren, ⟲ opnieuw,
+  instelbare duur (10–120 s). De knop **⬇ Exporteer MP4** neemt één
+  volledige cyclus op (canvas + MediaRecorder — **geen ffmpeg nodig**) en
+  downloadt `steam_games_released_timeline.mp4`.
+- **Games released per weekday** — statische staafgrafiek: aantal games per
+  dag-van-week (de aantallen staan in de y-as; boven elke staaf staat het
+  percentage). Dag-van-week primair uit `date.csv` (`day_of_week_label`,
+  ISO maandag=1); releasedatums buiten het bereik van `date.csv` (vóór
+  2003) worden direct uit de datum berekend.
+
+Donker thema; de **kleuren van de grafieken** pas je live aan met de
+kleurkiezers bovenaan de pagina: **Lijn** (lijn/oppervlak/balken) en
+**Accent** (stip + drukste dag).
+
+Draaien (fetch op de CSV's werkt niet vanaf `file://`, dus via een lokale
+server):
+
+```bash
+python -m http.server 8090
+# open http://localhost:8090/viz/index.html
+```
+
+De pagina leest `data/games.csv` + `data/date.csv` bij elke keer laden, dus
+na een verse run van de fetch-scripts + `jsonl_to_table.py` staat er meteen
+de nieuwste data in. Houd het tabblad zichtbaar tijdens een MP4-opname.
+
 ## ⚠️ Belangrijk
 
 - Het **100.000 requests/dag-limiet** uit de Terms of Use geldt voor de

@@ -1,0 +1,176 @@
+/* Steam-games visualisatie - styling (DONKER thema) */
+
+:root {
+  --bg: #0d141d;
+  --card: #141e2a;
+  --card-border: rgba(199, 213, 224, 0.13);
+  --text: #e6eef5;
+  --muted: #8ba2b6;
+  --ui-accent: #66c0f4;
+  --ui-accent-hover: #8ed2f8;
+  --btn-bg: rgba(199, 213, 224, 0.08);
+  --btn-bg-hover: rgba(199, 213, 224, 0.16);
+  --btn-border: rgba(199, 213, 224, 0.22);
+  --danger: #e74c3c;
+}
+
+* { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 15px;
+}
+
+header {
+  padding: 26px 34px 10px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+header h1 {
+  margin: 0;
+  font-size: 34px;
+  color: var(--text);
+}
+header .sub { margin: 6px 0 0; color: var(--muted); font-size: 18px; }
+code { background: rgba(199, 213, 224, 0.12); border-radius: 4px; padding: 1px 5px; }
+
+main {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 14px 34px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 18px 20px 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.card-head h2 {
+  margin: 0;
+  font-size: 22px;
+  color: var(--text);
+}
+
+.badge {
+  background: var(--danger);
+  color: #fff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 6px 18px;
+  letter-spacing: 0.3px;
+}
+
+.canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+}
+
+/* ---- Bediening bovenaan de pagina (250% groter) ---- */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  margin-top: 16px;
+}
+.btn {
+  background: var(--btn-bg);
+  border: 2px solid var(--btn-border);
+  color: var(--text);
+  border-radius: 18px;
+  padding: 18px 40px;
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn:hover { background: var(--btn-bg-hover); border-color: var(--ui-accent); }
+.btn.primary {
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: #0d141d;
+}
+.btn.primary:hover { background: var(--ui-accent-hover); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.recording { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+.dur {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--text);
+  font-size: 34px;
+  font-weight: 600;
+}
+.dur input[type="range"] {
+  width: 360px;
+  height: 14px;
+  accent-color: var(--ui-accent);
+  cursor: pointer;
+}
+.dur output {
+  min-width: 60px;
+  text-align: right;
+  color: var(--ui-accent);
+  font-weight: 700;
+}
+
+.colors {
+  display: inline-flex;
+  align-items: center;
+  gap: 22px;
+}
+.color {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 600;
+}
+.color input[type="color"] {
+  width: 96px;
+  height: 64px;
+  padding: 4px;
+  background: var(--card);
+  border: 2px solid var(--btn-border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.status { color: var(--muted); font-size: 26px; }
+
+.foot { margin: 10px 0 0; color: var(--muted); font-size: 16px; }
+.hint { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+
+.error-box {
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.45);
+  color: #ffb3a7;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 16px;
+}
