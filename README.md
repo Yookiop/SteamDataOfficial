@@ -32,10 +32,11 @@ komt er precies 1× in `data/games.jsonl` (de **basis** — elke game 1×,
    (keyless `GetNumberOfCurrentPlayers`) en de **review-samenvatting**
    (Review API, zie boven) en schrijft het slanke record weg.
 
-> ⚠️ De review-samenvatting kost 1 extra request per game. Overslaan kan
-> met `--no-reviews`. Games die al in de basis staan krijgen pas
-> review-velden bij een volgende `fetch_new_game_info.py`-run (elke
-> extra-info-regel haalt ze vers op) of na `--reset`.
+> De review-samenvatting kost 1 extra request per game en komt ALTIJD mee
+> (geen `--no-reviews`-optie meer) — reviews zijn standaard zo compleet
+> mogelijk. Games die al in de basis staan krijgen pas review-velden bij
+> een volgende `fetch_new_game_info.py`-run (elke extra-info-regel haalt
+> ze vers op) of na `--reset`.
 
 Blijf dit script draaien tot elke game 1× is opgenomen — het is hervatbaar en
 incrementeel (zie onder).
@@ -126,7 +127,6 @@ regels in dat bestand is de voortgang (geen checkpoint-bestand).
 python fetch_new_game_info.py                # alle master-games pollen
 python fetch_new_game_info.py --limit 500    # max. 500 games deze run
 python fetch_new_game_info.py --report-only  # alleen tonen wat er zou komen
-python fetch_new_game_info.py --no-reviews   # review-samenvatting overslaan
 python fetch_new_game_info.py --sync-reviews # basis (games.jsonl) bijwerken met
                                              # laatst bekende reviews en stoppen
 ```

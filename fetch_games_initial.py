@@ -26,8 +26,7 @@ Drie officiele Steam-bronnen (geen derde partijen zoals SteamSpy):
      zonder purchase_type=all toont Warframe bv. 2.871 reviews i.p.v.
      676.084). num_per_page=0 -> alleen de query_summary (review_score +
      review_score_desc zoals 'Very Positive'/'Mixed', en de positive/
-     negative/total-tellingen), geen review-teksten. Uitzetten kan met
-     --no-reviews.
+     negative/total-tellingen), geen review-teksten.
 
 'Nieuwe games' zijn appids die wel in de officiele app-lijst zitten maar nog
 NIET in de JSON-output (data/games.jsonl). Van elke nieuwe game worden de
@@ -106,12 +105,7 @@ Gebruik:
                                              # encoded bewaard voor volgende runs
     python fetch_games_initial.py --forget-key   # bewaarde key wissen
     python fetch_games_initial.py --limit 500    # max. 500 nieuwe appids deze run
-    python fetch_games_initial.py --report-only  # alleen tonen welke nieuw zijn
-    python fetch_games_initial.py --reset        # games/blacklist/duplicates wissen
-    python fetch_games_initial.py --blacklist-show           # blacklist tonen
-    python fetch_games_initial.py --blacklist-add 100 200    # handmatig toevoegen
-    python fetch_games_initial.py --blacklist-remove 100     # eruit halen -> weer 'nieuw'
-    python fetch_games_initial.py --no-reviews  # review-samenvatting overslaan
+    python fetch_games_initial.py --report-only  # alleen progressie tonen in te verwerken games
 
     De API key wordt de eerste keer AUTOMATISCH encoded (XOR+base64) bewaard
     in %APPDATA%/SteamDataOfficial/api_key.txt - BUIEN de repo (data/ wordt
@@ -701,11 +695,10 @@ def enrich_live(record, aid, args, stats):
     pc = fetch_player_count(aid, args.timeout)
     stats["requests"] += 1
     record["last_seen_player_count"] = pc
-    if args.no_reviews:
-        rev = None
-    else:
-        rev = fetch_review_summary(aid, args.timeout)
-        stats["requests"] += 1
+    # Review-samenvatting ALTIJD ophalen (geen --no-reviews meer): reviews
+    # moeten zo compleet mogelijk zijn.
+    rev = fetch_review_summary(aid, args.timeout)
+    stats["requests"] += 1
     for key in ("review_score", "review_score_desc",
                 "review_positive", "review_negative",
                 "review_total"):
@@ -960,9 +953,6 @@ def main(argv=None):
                    help=f"veiligheidslimiet op het aantal store-requests "
                         f"(1 appid per HTTP-call) per run "
                         f"(default: {DEFAULT_MAX_REQUESTS})")
-    p.add_argument("--no-reviews", action="store_true",
-                   help="geen review-samenvatting ophalen (Review API, 1 "
-                        "extra request per game); default: wel")
     args = p.parse_args(argv)
 
     data_dir = os.path.abspath(args.data_dir)

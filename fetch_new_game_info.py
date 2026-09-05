@@ -31,7 +31,7 @@ Per game per run (games met de MEESTE spelers eerst, daarna aflopend):
      review_negative en review_total - met language=all + purchase_type=all
      + filter=all (zelfde totaalbeeld als de storepagina; zie
      fetch_games_initial.py). Zo zie je per game ook hoe de beoordeling
-     over de tijd verandert. Uitzetten kan met --no-reviews.
+     over de tijd verandert (de review-samenvatting komt altijd mee).
   4. appid_amount = "<appid>_<n>" met doorlopende nummering per game binnen
      games_extra_info.jsonl: de eerste regel van een game is <appid>_1,
      daarna <appid>_2, _3, ...
@@ -479,9 +479,6 @@ def main(argv=None):
     p.add_argument("--max-requests", type=int, default=DEFAULT_MAX_REQUESTS,
                    help=f"veiligheidslimiet op het aantal requests per run "
                         f"(default: {DEFAULT_MAX_REQUESTS})")
-    p.add_argument("--no-reviews", action="store_true",
-                   help="geen review-samenvatting ophalen (Review API, 1 "
-                        "extra request per game); default: wel")
     args = p.parse_args(argv)
 
     data_dir = os.path.abspath(args.data_dir)
@@ -590,11 +587,10 @@ def main(argv=None):
                 pc = fetch_player_count(aid, args.timeout)
                 stats["requests"] += 1
                 record["last_seen_player_count"] = pc
-                if args.no_reviews:
-                    rev = None
-                else:
-                    rev = fetch_review_summary(aid, args.timeout)
-                    stats["requests"] += 1
+                # Review-samenvatting ALTIJD ophalen (geen --no-reviews
+                # meer): reviews moeten zo compleet mogelijk zijn.
+                rev = fetch_review_summary(aid, args.timeout)
+                stats["requests"] += 1
                 for key in ("review_score", "review_score_desc",
                             "review_positive", "review_negative",
                             "review_total"):
