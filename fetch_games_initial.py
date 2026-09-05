@@ -472,6 +472,22 @@ def iso_release_date(date_str):
     return ""
 
 
+# Steam is op 12 september 2003 gelanceerd. Games met een releasedatum van
+# voor die datum (de API geeft bv. Half-Life als 1998) zijn pas op Steam
+# verschenen bij de lancering: zet hun releasedatum dan op 2003-09-12.
+STEAM_LAUNCH_DATE = "2003-09-12"
+STEAM_LAUNCH_LABEL = "12 Sep, 2003"
+
+
+def clamp_steam_launch(iso_fmt):
+    """Release clamp: als de releasedatum (yyyy-mm-dd) voor 2003-09-12
+    ligt, wordt hij op de Steam-lancering gezet. Retourneert (iso, label);
+    label is None als de datum niet aangepast wordt."""
+    if iso_fmt and iso_fmt < STEAM_LAUNCH_DATE:
+        return STEAM_LAUNCH_DATE, STEAM_LAUNCH_LABEL
+    return iso_fmt, None
+
+
 def slim_record(appid, data):
     """Kies de relevante velden uit de (grote) appdetails-payload. De prijs
     is de price_overview zoals de API hem teruggeeft (altijd USD door cc=us);
@@ -488,6 +504,11 @@ def slim_record(appid, data):
         price = {}
     release = data.get("release_date") or {}
     rel_str = release.get("date") or ""
+    rel_iso = iso_release_date(rel_str)        # "2000-11-01"
+    # Games van voor de Steam-lancering (2003-09-12) tellen vanaf de
+    # lancering: de API geeft bv. Half-Life als 1998, maar op Steam
+    # verscheen het pas op 2003-09-12.
+    rel_iso, rel_launch_label = clamp_steam_launch(rel_iso)
     return {
         "appid": appid,
         "type": data.get("type"),
@@ -498,8 +519,8 @@ def slim_record(appid, data):
         "genres": [g.get("description") for g in data.get("genres") or []],
         "categories": [c.get("description")
                        for c in data.get("categories") or []],
-        "release_date": rel_str,               # zoals de API hem geeft
-        "release_date_format": iso_release_date(rel_str),   # "2000-11-01"
+        "release_date": rel_launch_label or rel_str,   # zoals de API / lancering
+        "release_date_format": rel_iso,                # "2003-09-12"
         "recommendations_total": (data.get("recommendations") or {}).get("total"),
     }
 

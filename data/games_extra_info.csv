@@ -1,34 +1,34 @@
 ﻿appid,name,type,is_free,price_currency,price_discount_pct,price_initial_fmt,price_final_fmt,release_date_fmt,recommendations,last_seen_players,review_score,review_score_desc,review_positive,review_negative,review_total,appid_amount,refresh_count
-10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2000-11-01,169623,7651,9,Overwhelmingly Positive,254802,6791,261593,10_1,1
-10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2000-11-01,169623,8120,9,Overwhelmingly Positive,254802,6791,261593,10_2,1
-10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2000-11-01,169623,8637,9,Overwhelmingly Positive,254803,6792,261595,10_3,1
-10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2000-11-01,169624,8637,9,Overwhelmingly Positive,254803,6792,261595,10_4,1
-20,Team Fortress Classic,game,False,USD,0,$4.99,$4.99,1999-04-01,7048,21,8,Very Positive,8091,1189,9280,20_1,1
-20,Team Fortress Classic,game,False,USD,0,$4.99,$4.99,1999-04-01,7048,27,8,Very Positive,8091,1189,9280,20_2,1
-20,Team Fortress Classic,game,False,USD,0,$4.99,$4.99,1999-04-01,7048,27,8,Very Positive,8091,1189,9280,20_3,1
-30,Day of Defeat,game,False,USD,0,$4.99,$4.99,2003-05-01,4475,65,8,Very Positive,6645,724,7369,30_1,1
-30,Day of Defeat,game,False,USD,0,$4.99,$4.99,2003-05-01,4475,79,8,Very Positive,6645,724,7369,30_2,1
-30,Day of Defeat,game,False,USD,0,$4.99,$4.99,2003-05-01,4475,91,8,Very Positive,6645,724,7369,30_3,1
-40,Deathmatch Classic,game,False,USD,0,$4.99,$4.99,2001-06-01,2451,3,8,Very Positive,2763,556,3319,40_1,1
-40,Deathmatch Classic,game,False,USD,0,$4.99,$4.99,2001-06-01,2451,3,8,Very Positive,2763,556,3319,40_2,1
-40,Deathmatch Classic,game,False,USD,0,$4.99,$4.99,2001-06-01,2451,2,8,Very Positive,2763,556,3319,40_3,1
-50,Half-Life: Opposing Force,game,False,USD,0,$4.99,$4.99,1999-11-01,25387,81,9,Overwhelmingly Positive,27583,1345,28928,50_1,1
-50,Half-Life: Opposing Force,game,False,USD,0,$4.99,$4.99,1999-11-01,25387,88,9,Overwhelmingly Positive,27583,1345,28928,50_2,1
-50,Half-Life: Opposing Force,game,False,USD,0,$4.99,$4.99,1999-11-01,25387,96,9,Overwhelmingly Positive,27583,1345,28928,50_3,1
-60,Ricochet,game,False,USD,0,$4.99,$4.99,2000-11-01,4550,1,8,Very Positive,5217,1053,6270,60_1,1
-60,Ricochet,game,False,USD,0,$4.99,$4.99,2000-11-01,4550,2,8,Very Positive,5217,1053,6270,60_2,1
-60,Ricochet,game,False,USD,0,$4.99,$4.99,2000-11-01,4550,1,8,Very Positive,5217,1053,6270,60_3,1
-70,Half-Life,game,False,USD,0,$9.99,$9.99,1998-11-19,117120,653,9,Overwhelmingly Positive,158156,5744,163900,70_1,1
-70,Half-Life,game,False,USD,0,$9.99,$9.99,1998-11-19,117120,664,9,Overwhelmingly Positive,158156,5744,163900,70_2,1
-70,Half-Life,game,False,USD,0,$9.99,$9.99,1998-11-19,117121,708,9,Overwhelmingly Positive,158156,5744,163900,70_3,1
-70,Half-Life,game,False,USD,0,$9.99,$9.99,1998-11-19,117120,708,9,Overwhelmingly Positive,158156,5744,163900,70_4,1
+10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2003-09-12,169623,7651,9,Overwhelmingly Positive,254802,6791,261593,10_1,1
+10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2003-09-12,169623,8120,9,Overwhelmingly Positive,254802,6791,261593,10_2,1
+10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2003-09-12,169623,8637,9,Overwhelmingly Positive,254803,6792,261595,10_3,1
+10,Counter-Strike,game,False,USD,0,$9.99,$9.99,2003-09-12,169624,8637,9,Overwhelmingly Positive,254803,6792,261595,10_4,1
+20,Team Fortress Classic,game,False,USD,0,$4.99,$4.99,2003-09-12,7048,21,8,Very Positive,8091,1189,9280,20_1,1
+20,Team Fortress Classic,game,False,USD,0,$4.99,$4.99,2003-09-12,7048,27,8,Very Positive,8091,1189,9280,20_2,1
+20,Team Fortress Classic,game,False,USD,0,$4.99,$4.99,2003-09-12,7048,27,8,Very Positive,8091,1189,9280,20_3,1
+30,Day of Defeat,game,False,USD,0,$4.99,$4.99,2003-09-12,4475,65,8,Very Positive,6645,724,7369,30_1,1
+30,Day of Defeat,game,False,USD,0,$4.99,$4.99,2003-09-12,4475,79,8,Very Positive,6645,724,7369,30_2,1
+30,Day of Defeat,game,False,USD,0,$4.99,$4.99,2003-09-12,4475,91,8,Very Positive,6645,724,7369,30_3,1
+40,Deathmatch Classic,game,False,USD,0,$4.99,$4.99,2003-09-12,2451,3,8,Very Positive,2763,556,3319,40_1,1
+40,Deathmatch Classic,game,False,USD,0,$4.99,$4.99,2003-09-12,2451,3,8,Very Positive,2763,556,3319,40_2,1
+40,Deathmatch Classic,game,False,USD,0,$4.99,$4.99,2003-09-12,2451,2,8,Very Positive,2763,556,3319,40_3,1
+50,Half-Life: Opposing Force,game,False,USD,0,$4.99,$4.99,2003-09-12,25387,81,9,Overwhelmingly Positive,27583,1345,28928,50_1,1
+50,Half-Life: Opposing Force,game,False,USD,0,$4.99,$4.99,2003-09-12,25387,88,9,Overwhelmingly Positive,27583,1345,28928,50_2,1
+50,Half-Life: Opposing Force,game,False,USD,0,$4.99,$4.99,2003-09-12,25387,96,9,Overwhelmingly Positive,27583,1345,28928,50_3,1
+60,Ricochet,game,False,USD,0,$4.99,$4.99,2003-09-12,4550,1,8,Very Positive,5217,1053,6270,60_1,1
+60,Ricochet,game,False,USD,0,$4.99,$4.99,2003-09-12,4550,2,8,Very Positive,5217,1053,6270,60_2,1
+60,Ricochet,game,False,USD,0,$4.99,$4.99,2003-09-12,4550,1,8,Very Positive,5217,1053,6270,60_3,1
+70,Half-Life,game,False,USD,0,$9.99,$9.99,2003-09-12,117120,653,9,Overwhelmingly Positive,158156,5744,163900,70_1,1
+70,Half-Life,game,False,USD,0,$9.99,$9.99,2003-09-12,117120,664,9,Overwhelmingly Positive,158156,5744,163900,70_2,1
+70,Half-Life,game,False,USD,0,$9.99,$9.99,2003-09-12,117121,708,9,Overwhelmingly Positive,158156,5744,163900,70_3,1
+70,Half-Life,game,False,USD,0,$9.99,$9.99,2003-09-12,117120,708,9,Overwhelmingly Positive,158156,5744,163900,70_4,1
 80,Counter-Strike: Condition Zero,game,False,USD,0,$9.99,$9.99,2004-03-01,21420,357,8,Very Positive,25947,2425,28372,80_1,1
 80,Counter-Strike: Condition Zero,game,False,USD,0,$9.99,$9.99,2004-03-01,21420,386,8,Very Positive,25947,2425,28372,80_2,1
 80,Counter-Strike: Condition Zero,game,False,USD,0,$9.99,$9.99,2004-03-01,21420,424,8,Very Positive,25947,2425,28372,80_3,1
 80,Counter-Strike: Condition Zero,game,False,USD,0,$9.99,$9.99,2004-03-01,21420,424,8,Very Positive,25947,2425,28372,80_4,1
-130,Half-Life: Blue Shift,game,False,USD,0,$4.99,$4.99,2001-06-01,18628,42,8,Very Positive,19642,1570,21212,130_1,1
-130,Half-Life: Blue Shift,game,False,USD,0,$4.99,$4.99,2001-06-01,18627,42,8,Very Positive,19641,1570,21211,130_2,1
-130,Half-Life: Blue Shift,game,False,USD,0,$4.99,$4.99,2001-06-01,18627,40,8,Very Positive,19641,1570,21211,130_3,1
+130,Half-Life: Blue Shift,game,False,USD,0,$4.99,$4.99,2003-09-12,18628,42,8,Very Positive,19642,1570,21212,130_1,1
+130,Half-Life: Blue Shift,game,False,USD,0,$4.99,$4.99,2003-09-12,18627,42,8,Very Positive,19641,1570,21211,130_2,1
+130,Half-Life: Blue Shift,game,False,USD,0,$4.99,$4.99,2003-09-12,18627,40,8,Very Positive,19641,1570,21211,130_3,1
 220,Half-Life 2,game,False,USD,0,$9.99,$9.99,2004-11-16,202408,1588,9,Overwhelmingly Positive,272173,6708,278881,220_1,1
 220,Half-Life 2,game,False,USD,0,$9.99,$9.99,2004-11-16,202408,1682,9,Overwhelmingly Positive,272173,6708,278881,220_2,1
 220,Half-Life 2,game,False,USD,0,$9.99,$9.99,2004-11-16,202404,1765,9,Overwhelmingly Positive,272173,6708,278881,220_3,1

@@ -68,6 +68,14 @@ geeft — er wordt **niets omgerekend**), `publishers`, `genres` (namen),
 `review_positive`, `review_negative`, `review_total` — `null` als die request
 mislukte).
 
+> 🔁 **Steam-lancering-clamp:** Steam is op **12 september 2003** gelanceerd.
+> Games met een releasedatum vóór die datum (de API geeft bv. Half-Life als
+> 1998) zijn pas bij de lancering op Steam verschenen en krijgen daarom
+> `release_date_format = 2003-09-12` + `release_date = "12 Sep, 2003"`. Dit
+> zit in beide fetch-scripts (`clamp_steam_launch` in `slim_record`); de
+> eerder verzamelde data is eenmalig op die manier gemigreerd (min
+> releasedatum in `games.csv` is nu 2003-09-12).
+
 De **basis** (`games.jsonl`/`games.csv`) heeft géén `appid_amount` — elke
 appid komt er maar 1× in voor. De doorlopende per-game nummering
 (`appid_amount` = `<appid>_1`, `_2`, `_3`, ...) leeft uitsluitend in
@@ -154,19 +162,25 @@ browser toont (geen GIF — de animatie speelt live af en je exporteert een
 - **Amount of Steam games over time** — geanimeerde cumulatieve tijdlijn:
   het aantal games (appids uit `games.csv`) dat tot elke releasedatum is
   uitgekomen. De tijdcursor loopt over de hele periode en voegt per release
-  games toe aan de lijn. Bediening: ▶ afspelen/pauzeren, ⟲ opnieuw,
-  instelbare duur (10–120 s). De knop **⬇ Exporteer MP4** neemt één
-  volledige cyclus op (canvas + MediaRecorder — **geen ffmpeg nodig**) en
-  downloadt `steam_games_released_timeline.mp4`.
+  games toe aan de lijn; bij de teller staat alleen maand + jaar (geen dag).
+  Boven de grafiek staat de bediening: ▶ Play/pause, ⟲ Restart, een
+  instelbare **Duration** (10–120 s), de kleurkiezers en de knop
+  **⬇ Export MP4** (neemt één volledige cyclus op via canvas +
+  MediaRecorder — **geen ffmpeg nodig**) die
+  `steam_games_released_timeline.mp4` downloadt.
 - **Games released per weekday** — statische staafgrafiek: aantal games per
   dag-van-week (de aantallen staan in de y-as; boven elke staaf staat het
   percentage). Dag-van-week primair uit `date.csv` (`day_of_week_label`,
-  ISO maandag=1); releasedatums buiten het bereik van `date.csv` (vóór
-  2003) worden direct uit de datum berekend.
+  ISO maandag=1); releasedatums buiten het bereik van `date.csv` worden
+  direct uit de datum berekend (sinds de 2003-09-12-clamp geen enkele meer).
 
-Donker thema; de **kleuren van de grafieken** pas je live aan met de
-kleurkiezers bovenaan de pagina: **Lijn** (lijn/oppervlak/balken) en
-**Accent** (stip + drukste dag).
+Donker thema; de **hele interface is Engels**. Kleuren zijn **per grafiek**
+instelbaar: boven de tijdlijn **Line** (lijn/oppervlak + teller) en
+**Accent** (stip); boven de weekday-grafiek een eigen **Color** (alle
+balken). Elke grafiek heeft daarnaast zijn eigen rij met **Axis** (grootte
+10–44), **Bold** en **Color** voor de x-/y-aswaarden, plus een **Y label**
+toggle (verbergt bv. het label "Amount"). Die as-instellingen zijn
+gedeeld: ze werken op alle grafieken (ook toekomstige).
 
 Draaien (fetch op de CSV's werkt niet vanaf `file://`, dus via een lokale
 server):

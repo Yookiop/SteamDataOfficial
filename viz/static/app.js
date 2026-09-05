@@ -16,17 +16,30 @@
 "use strict";
 
 /* ---------- Kleuren ----------
- * Vast: donker thema. Aanpasbaar via de kleurkiezers op de pagina:
- * colors.line (lijn / oppervlak / balken) en colors.accent (stip / drukste dag). */
+ * Vast: donker thema. Per-grafiek kleuren (niet gedeeld):
+ * chartColors.timeline (lijn/oppervlak/teller = line, stip = accent) en
+ * chartColors.weekday (balken = color). Elke grafiek heeft eigen kleurkiezer(s). */
 const C = {
   bg: "#0f1a26",                     // canvas-achtergrond
   grid: "rgba(199,213,224,0.08)",    // rasterlijnen
   axis: "rgba(199,213,224,0.30)",    // as-kader
-  text: "#e6eef5",                   // titels / hoofdkleur
-  muted: "#8ba2b6",                  // bijschriften / ticklabels
+  text: "#ffffff",                   // titels / labels (default WIT)
+  muted: "#8ba2b6",                  // bijschriften (subtitel, datumlabel)
 };
 
-let colors = { line: "#66c0f4", accent: "#e74c3c" };
+/* Kleuren per grafiek (NIET gedeeld): elke grafiek heeft eigen kleurkiezer(s). */
+const chartColors = {
+  timeline: { line: "#66c0f4", accent: "#e74c3c" },
+  weekday:  { color: "#66c0f4" },
+};
+
+/* Stijl van de x-/y-aswaarden (ticklabels) + y-as-label (bv. Amount).
+ * Instelbaar op de pagina en GEDEELD: elke grafiek (ook toekomstige)
+ * gebruikt deze waarden via axisFont()/axis.color/axis.yLabel. */
+const axis = { size: 20, bold: false, color: C.text, yLabel: true };
+function axisFont() {
+  return `${axis.bold ? 700 : 500} ${axis.size}px 'Segoe UI', Arial, sans-serif`;
+}
 
 /* '#rrggbb' + alpha -> 'rgba(r,g,b,a)' (voor het oppervlak onder de lijn). */
 function withAlpha(hex, alpha) {
@@ -40,8 +53,9 @@ const DAYS_ORDER = ["monday", "tuesday", "wednesday", "thursday",
                     "friday", "saturday", "sunday"];
 const DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday",
                     "Friday", "Saturday", "Sunday"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS_FULL = ["January", "February", "March", "April", "May",
+                     "June", "July", "August", "September", "October",
+                     "November", "December"];
 
 const el = {
   timeline: document.getElementById("timelineCanvas"),
@@ -55,6 +69,17 @@ const el = {
   recBadge: document.getElementById("recBadge"),
   lineColor: document.getElementById("lineColor"),
   accentColor: document.getElementById("accentColor"),
+  weekdayColor: document.getElementById("weekdayColor"),
+  axisSize: document.getElementById("axisSize"),
+  axisSizeVal: document.getElementById("axisSizeVal"),
+  axisBold: document.getElementById("axisBold"),
+  axisColor: document.getElementById("axisColor"),
+  axisYLabel: document.getElementById("axisYLabel"),
+  wdAxisSize: document.getElementById("wdAxisSize"),
+  wdAxisSizeVal: document.getElementById("wdAxisSizeVal"),
+  wdBold: document.getElementById("wdBold"),
+  wdColor: document.getElementById("wdAxisColor"),
+  wdYLabel: document.getElementById("wdYLabel"),
   dataInfo: document.getElementById("dataInfo"),
   timelineFoot: document.getElementById("timelineFoot"),
   weekdayFoot: document.getElementById("weekdayFoot"),
@@ -111,10 +136,9 @@ function dateToDowIdx(s) {
   const d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
   return (d.getUTCDay() + 6) % 7;
 }
-function fmtDate(ms) {
+function fmtMonthYear(ms) {
   const d = new Date(ms);
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${dd} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  return `${d.getUTCFullYear()}-${MONTHS_FULL[d.getUTCMonth()]}`;
 }
 
 /* Eenvoudige RFC4180-achtige CSV-parser (aanhalingstekens + , in veld). */
@@ -221,24 +245,28 @@ async function loadData() {
     const dLast = new Date(times[times.length - 1]);
     state.firstYear = dFirst.getUTCFullYear();
     state.lastYear = dLast.getUTCFullYear();
-    state.tMin = Date.UTC(state.firstYear - 1, 6, 1);      // midden van jaar ervoor
+    // De grafiek begint bij de Steam-lancering (september 2003), dus geen
+    // lege voorloop in 2002: start op 1 september van het eerste jaar (of
+    // op de eerste releasedatum zelf als die eerder zou liggen).
+    state.tMin = Math.min(Date.UTC(state.firstYear, 8, 1),
+                          state.relTimes[0]);
     state.tMax = Date.UTC(state.lastYear + 1, 5, 1);       // midden van jaar erna
     state.ymax = Math.ceil(counts[counts.length - 1] / 100) * 100;
 
     // Footers / koptekst.
     el.dataInfo.textContent =
-      `${fmtInt(state.gamesTotal)} games uit games.csv · ` +
-      `${fmtInt(state.withDate)} met releasedatum`;
+      `${fmtInt(state.gamesTotal)} games from games.csv · ` +
+      `${fmtInt(state.withDate)} with a release date`;
     el.timelineFoot.textContent =
-      `${fmtInt(state.withDate)} games met bekende releasedatum ` +
-      `(${fmtInt(state.gamesTotal)} totaal in games.csv) · ` +
-      `${state.relTimes.length} unieke releasedatums · ` +
-      `animatie van ${state.firstYear} tot ${state.lastYear}`;
+      `${fmtInt(state.withDate)} games with a known release date ` +
+      `(${fmtInt(state.gamesTotal)} in total in games.csv) · ` +
+      `${state.relTimes.length} unique release dates · ` +
+      `animation from ${state.firstYear} to ${state.lastYear}`;
     const dowTotal = state.weekdayCounts.reduce((a, b) => a + b, 0);
     el.weekdayFoot.textContent =
-      `Gebaseerd op ${fmtInt(dowTotal)} releases · dag-van-week uit date.csv ` +
-      `(ISO, maandag=1)${state.weekdayFallback
-        ? ` · ${state.weekdayFallback} releases vóór 2003 direct uit de datum berekend`
+      `Based on ${fmtInt(dowTotal)} releases · weekday from date.csv ` +
+      `(ISO, Monday=1)${state.weekdayFallback
+        ? ` · ${state.weekdayFallback} releases before 2003 computed directly from the date`
         : ""}`;
 
     drawWeekday();
@@ -246,13 +274,13 @@ async function loadData() {
     drawTimeline(0);
     state.ready = true;
   } catch (err) {
-    el.dataInfo.textContent = "❌ laden mislukt";
+    el.dataInfo.textContent = "❌ Failed to load";
     const box = document.createElement("div");
     box.className = "error-box";
     box.textContent =
-      "Kon data/games.csv of data/date.csv niet laden (" + err.message + "). " +
-      "Open deze pagina via een lokale webserver (zie instructie onderaan de " +
-      "pagina) - fetch werkt niet vanaf file://.";
+      "Could not load data/games.csv or data/date.csv (" + err.message + "). " +
+      "Open this page through a local web server - fetch does not work " +
+      "from file://.";
     document.querySelector("main").prepend(box);
     console.error(err);
   }
@@ -290,7 +318,7 @@ function drawTimeline(p) {
 
   /* Y-grid + labels */
   const yStep = niceStep(st.ymax / 8);
-  ctx.font = "500 21px 'Segoe UI', Arial, sans-serif";
+  ctx.font = axisFont();
   ctx.textAlign = "right";
   for (let v = 0; v <= st.ymax; v += yStep) {
     ctx.strokeStyle = C.grid;
@@ -299,13 +327,14 @@ function drawTimeline(p) {
     ctx.moveTo(x0, Y(v));
     ctx.lineTo(x0 + pw, Y(v));
     ctx.stroke();
-    ctx.fillStyle = C.muted;
+    ctx.fillStyle = axis.color;
     ctx.fillText(fmtInt(v), x0 - 14, Y(v) + 7);
   }
 
   /* X-grid + jaarlabels (elke 2 jaar) */
   const yStart = new Date(st.tMin).getUTCFullYear();
   const yEnd = new Date(st.tMax).getUTCFullYear();
+  ctx.font = axisFont();
   ctx.textAlign = "center";
   for (let yr = Math.ceil(yStart / 2) * 2; yr <= yEnd; yr += 2) {
     const x = X(Date.UTC(yr, 0, 1));
@@ -314,7 +343,7 @@ function drawTimeline(p) {
     ctx.moveTo(x, y0);
     ctx.lineTo(x, y0 + ph);
     ctx.stroke();
-    ctx.fillStyle = C.muted;
+    ctx.fillStyle = axis.color;
     ctx.fillText(String(yr), x, y0 + ph + 30);
   }
 
@@ -337,7 +366,7 @@ function drawTimeline(p) {
     ctx.lineTo(X(tCur), Y(curCount));
     ctx.lineTo(X(tCur), Y(0));
     ctx.closePath();
-    ctx.fillStyle = withAlpha(colors.line, 0.22);
+    ctx.fillStyle = withAlpha(chartColors.timeline.line, 0.22);
     ctx.fill();
 
     // lijn
@@ -347,7 +376,7 @@ function drawTimeline(p) {
       ctx.lineTo(X(st.relTimes[i]), Y(st.relCounts[i]));
     }
     ctx.lineTo(X(tCur), Y(curCount));
-    ctx.strokeStyle = colors.line;
+    ctx.strokeStyle = chartColors.timeline.line;
     ctx.lineWidth = 4;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
@@ -365,7 +394,7 @@ function drawTimeline(p) {
   /* Kop-stip */
   ctx.beginPath();
   ctx.arc(X(tCur), Y(curCount), 9, 0, Math.PI * 2);
-  ctx.fillStyle = colors.accent;
+  ctx.fillStyle = chartColors.timeline.accent;
   ctx.fill();
   ctx.lineWidth = 3;
   ctx.strokeStyle = C.bg;
@@ -373,12 +402,12 @@ function drawTimeline(p) {
 
   /* Grote teller + datum (in de kop boven de plot) */
   ctx.textAlign = "left";
-  ctx.fillStyle = colors.line;
+  ctx.fillStyle = chartColors.timeline.line;
   ctx.font = "800 88px 'Segoe UI', Arial, sans-serif";
   ctx.fillText(fmtInt(curCount), x0, 168);
-  ctx.font = "500 25px 'Segoe UI', Arial, sans-serif";
+  ctx.font = "500 35px 'Segoe UI', Arial, sans-serif";
   ctx.fillStyle = C.muted;
-  ctx.fillText("games released up to " + fmtDate(tCur), x0, 212);
+  ctx.fillText("Games released up to " + fmtMonthYear(tCur), x0, 212);
 }
 
 /* =====================================================================
@@ -408,20 +437,22 @@ function drawWeekday() {
   ctx.font = "700 40px 'Segoe UI', Arial, sans-serif";
   ctx.fillText("Games released per weekday", W / 2, 66);
 
-  /* Y-as-label "Amount" (geroteerd) */
-  ctx.save();
-  ctx.translate(52, y0 + ph / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = C.muted;
-  ctx.font = "700 30px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText("Amount", 0, 0);
-  ctx.restore();
+  /* Y-as-label "Amount" (geroteerd) - verbergbaar met de Y-label-toggle */
+  if (axis.yLabel) {
+    ctx.save();
+    ctx.translate(52, y0 + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = axis.color;
+    ctx.font = "700 30px 'Segoe UI', Arial, sans-serif";
+    ctx.fillText("Amount", 0, 0);
+    ctx.restore();
+  }
 
   /* Y-grid + ticklabels (de aantallen staan in de y-as) */
   const yStep = niceStep(yMax / 6);
-  ctx.font = "500 20px 'Segoe UI', Arial, sans-serif";
+  ctx.font = axisFont();
   ctx.textAlign = "right";
   ctx.textBaseline = "alphabetic";
   for (let v = 0; v <= yMax; v += yStep) {
@@ -430,7 +461,7 @@ function drawWeekday() {
     ctx.moveTo(x0, Y(v));
     ctx.lineTo(x0 + pw, Y(v));
     ctx.stroke();
-    ctx.fillStyle = C.muted;
+    ctx.fillStyle = axis.color;
     ctx.fillText(fmtInt(v), x0 - 14, Y(v) + 7);
   }
 
@@ -443,17 +474,17 @@ function drawWeekday() {
   ctx.lineTo(x0 + pw, y0 + ph);
   ctx.stroke();
 
-  /* Staafjes + alleen het percentage boven elke staaf */
+  /* Bars (all the same color = chartColors.weekday.color) + only the
+   * percentage above each bar */
   const slot = pw / 7;
   const barW = slot * 0.56;
-  const maxIdx = vals.indexOf(maxV);
   ctx.textAlign = "center";
   for (let i = 0; i < 7; i++) {
     const cx = x0 + slot * (i + 0.5);
     const v = vals[i];
     const pct = total ? (100 * v) / total : 0;
-    // staaf
-    ctx.fillStyle = i === maxIdx ? colors.accent : colors.line;
+    // bar
+    ctx.fillStyle = chartColors.weekday.color;
     ctx.fillRect(cx - barW / 2, Y(v), barW, y0 + ph - Y(v));
     // percentage boven de staaf
     ctx.fillStyle = C.text;
@@ -462,8 +493,8 @@ function drawWeekday() {
   }
 
   /* Weekday-labels onder de as */
-  ctx.fillStyle = C.muted;
-  ctx.font = "500 20px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = axis.color;
+  ctx.font = axisFont();
   ctx.textAlign = "center";
   for (let i = 0; i < 7; i++) {
     ctx.fillText(DAY_LABELS[i], x0 + slot * (i + 0.5), y0 + ph + 38);
@@ -474,7 +505,7 @@ function drawWeekday() {
  * Afspelen
  * ===================================================================== */
 function setPlayUI() {
-  el.playBtn.textContent = state.playing ? "⏸ Pauze" : "▶ Afspelen";
+  el.playBtn.textContent = state.playing ? "⏸ Pause" : "▶ Play";
 }
 
 function loop(ts) {
@@ -488,6 +519,56 @@ function loop(ts) {
   }
   state.lastTs = ts;
   requestAnimationFrame(loop);
+}
+
+function redrawCharts() {
+  if (!state.ready) return;
+  if (!state.playing) drawTimeline(state.pauseP);
+  drawWeekday();
+}
+
+/* Koppel een as-config-regel (grootte/vet/kleur/y-label) aan de gedeelde
+ * axis-instellingen. Zo werkt dezelfde config boven de tijdlijn én boven
+ * de weekday-grafiek (en elke toekomstige grafiek die hem toevoegt). */
+function bindAxisGroup(g) {
+  g.size.addEventListener("input", () => {
+    if (state.recording) return;
+    axis.size = +g.size.value;
+    syncAxisUI();
+    redrawCharts();
+  });
+  g.bold.addEventListener("change", () => {
+    if (state.recording) return;
+    axis.bold = g.bold.checked;
+    syncAxisUI();
+    redrawCharts();
+  });
+  g.color.addEventListener("input", () => {
+    if (state.recording) return;
+    axis.color = g.color.value;
+    syncAxisUI();
+    redrawCharts();
+  });
+  g.ylabel.addEventListener("change", () => {
+    if (state.recording) return;
+    axis.yLabel = g.ylabel.checked;
+    syncAxisUI();
+    redrawCharts();
+  });
+}
+
+/* Spiegel de gedeelde axis-instellingen naar alle regelaars op de pagina. */
+function syncAxisUI() {
+  el.axisSize.value = axis.size;
+  el.wdAxisSize.value = axis.size;
+  el.axisSizeVal.value = axis.size;
+  el.wdAxisSizeVal.value = axis.size;
+  el.axisBold.checked = axis.bold;
+  el.wdBold.checked = axis.bold;
+  el.axisColor.value = axis.color;
+  el.wdColor.value = axis.color;
+  el.axisYLabel.checked = axis.yLabel;
+  el.wdYLabel.checked = axis.yLabel;
 }
 
 function bindControls() {
@@ -512,16 +593,28 @@ function bindControls() {
   });
   el.lineColor.addEventListener("input", () => {
     if (state.recording) return;
-    colors.line = el.lineColor.value;
-    if (!state.playing) drawTimeline(state.pauseP);
-    drawWeekday();
+    chartColors.timeline.line = el.lineColor.value;
+    redrawCharts();
   });
   el.accentColor.addEventListener("input", () => {
     if (state.recording) return;
-    colors.accent = el.accentColor.value;
-    if (!state.playing) drawTimeline(state.pauseP);
+    chartColors.timeline.accent = el.accentColor.value;
+    redrawCharts();
+  });
+  el.weekdayColor.addEventListener("input", () => {
+    if (state.recording) return;
+    chartColors.weekday.color = el.weekdayColor.value;
     drawWeekday();
   });
+  bindAxisGroup({
+    size: el.axisSize, sizeVal: el.axisSizeVal,
+    bold: el.axisBold, color: el.axisColor, ylabel: el.axisYLabel,
+  });
+  bindAxisGroup({
+    size: el.wdAxisSize, sizeVal: el.wdAxisSizeVal,
+    bold: el.wdBold, color: el.wdColor, ylabel: el.wdYLabel,
+  });
+  syncAxisUI();
   el.exportBtn.addEventListener("click", () => {
     if (state.recording) stopExport(true); // knop = annuleren tijdens opname
     else startExport();
@@ -534,6 +627,15 @@ function setControlsDisabled(disabled) {
   el.durSlider.disabled = disabled;
   el.lineColor.disabled = disabled;
   el.accentColor.disabled = disabled;
+  el.weekdayColor.disabled = disabled;
+  el.axisSize.disabled = disabled;
+  el.axisBold.disabled = disabled;
+  el.axisColor.disabled = disabled;
+  el.axisYLabel.disabled = disabled;
+  el.wdAxisSize.disabled = disabled;
+  el.wdBold.disabled = disabled;
+  el.wdColor.disabled = disabled;
+  el.wdYLabel.disabled = disabled;
 }
 
 /* =====================================================================
@@ -560,13 +662,13 @@ function startExport() {
   let stream;
   try { stream = cv.captureStream(60); }
   catch (e) {
-    el.exportStatus.textContent = "❌ captureStream niet ondersteund in deze browser.";
+    el.exportStatus.textContent = "❌ captureStream is not supported in this browser.";
     el.exportStatus.hidden = false;
     return;
   }
   const mime = pickMime();
   if (!mime) {
-    el.exportStatus.textContent = "❌ MediaRecorder niet ondersteund in deze browser.";
+    el.exportStatus.textContent = "❌ MediaRecorder is not supported in this browser.";
     el.exportStatus.hidden = false;
     return;
   }
@@ -595,11 +697,11 @@ function startExport() {
 
   // UI: opname-modus
   el.recBadge.hidden = false;
-  el.exportBtn.textContent = "■ Stop (annuleer MP4)";
+  el.exportBtn.textContent = "■ Stop (cancel MP4)";
   el.exportBtn.classList.add("recording");
   el.exportStatus.hidden = false;
   el.exportStatus.textContent =
-    `⏺ Opnemen… één volledige cyclus (${el.durSlider.value} s) — houd dit tabblad zichtbaar.`;
+    `⏺ Recording… one full cycle (${el.durSlider.value} s) — keep this tab visible.`;
   setControlsDisabled(true);
 
   rec.start(250);
@@ -629,13 +731,13 @@ function finalizeExport() {
 
   // UI terugzetten
   el.recBadge.hidden = true;
-  el.exportBtn.textContent = "⬇ Exporteer MP4";
+  el.exportBtn.textContent = "⬇ Export MP4";
   el.exportBtn.classList.remove("recording");
   setControlsDisabled(false);
   setPlayUI();
 
   if (wasCancelled) {
-    el.exportStatus.textContent = "Export geannuleerd.";
+    el.exportStatus.textContent = "Export cancelled.";
     state.chunks = [];
     return;
   }
@@ -652,7 +754,7 @@ function finalizeExport() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  el.exportStatus.textContent = `✅ Gedownload: ${name} (${fmtInt(Math.round(blob.size / 1024))} kB).`;
+  el.exportStatus.textContent = `✅ Downloaded: ${name} (${fmtInt(Math.round(blob.size / 1024))} kB).`;
 }
 
 /* =====================================================================

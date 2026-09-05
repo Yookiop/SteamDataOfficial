@@ -1,67 +1,107 @@
 <!DOCTYPE html>
-<html lang="nl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Steam-games visualisatie</title>
+<title>Steam games visualization</title>
 <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
 
 <header>
-  <h1>Steam-games visualisatie</h1>
-  <p class="sub">Grafieken van de data in <code>data/</code> — <span id="dataInfo">laden…</span></p>
+  <h1>Steam games visualization</h1>
+  <p class="sub">Charts from the data in <code>data/</code> — <span id="dataInfo">Loading…</span></p>
 </header>
 
 <main>
 
-  <!-- ===================== Tijdlijn (geanimeerd) ===================== -->
+  <!-- ===================== Timeline (animated) ===================== -->
   <section class="card">
     <div class="card-head">
       <h2>Amount of Steam games over time</h2>
-      <span id="recBadge" class="badge" hidden>⏺ Opnemen…</span>
+      <span id="recBadge" class="badge" hidden>⏺ Recording…</span>
+    </div>
+
+    <div class="controls">
+      <button id="playBtn" class="btn" title="Play / pause">▶ Play</button>
+      <button id="restartBtn" class="btn" title="Restart from the beginning">⟲ Restart</button>
+
+      <label class="dur" for="durSlider">Duration
+        <input type="range" id="durSlider" min="10" max="120" step="5" value="30">
+        <output id="durVal" for="durSlider">30</output> s
+      </label>
+
+      <span class="colors">
+        <label class="color" for="lineColor">Line
+          <input type="color" id="lineColor" value="#66c0f4" title="Color of the line, the area and the counter">
+        </label>
+        <label class="color" for="accentColor">Accent
+          <input type="color" id="accentColor" value="#e74c3c" title="Color of the dot on the timeline">
+        </label>
+      </span>
+
+      <span class="axisgroup" title="X/Y axis values: size, bold, color and the y-axis label">
+        <label class="as-size" for="axisSize">Axis
+          <input type="range" id="axisSize" min="10" max="44" step="1" value="20">
+          <output id="axisSizeVal" for="axisSize">20</output>
+        </label>
+        <label class="tick" for="axisBold">Bold
+          <input type="checkbox" id="axisBold" title="Axis values in bold">
+        </label>
+        <label class="color" for="axisColor">Color
+          <input type="color" id="axisColor" value="#ffffff" title="Color of the axis values">
+        </label>
+        <label class="tick" for="axisYLabel" title="Show the label along the y-axis (e.g. Amount)">Y label
+          <input type="checkbox" id="axisYLabel" checked>
+        </label>
+      </span>
+
+      <button id="exportBtn" class="btn primary" title="Record one full cycle of the animation and download it as MP4">
+        ⬇ Export MP4
+      </button>
+      <span id="exportStatus" class="status" hidden></span>
     </div>
 
     <div class="canvas-wrap">
       <canvas id="timelineCanvas" width="1600" height="900"></canvas>
     </div>
 
+    <p class="foot" id="timelineFoot">Loading…</p>
+    <p class="hint">The animation plays in real time; the MP4 export records one full cycle
+      (keep this tab visible while recording).</p>
+  </section>
+
+  <!-- ===================== Weekday (static) ===================== -->
+  <section class="card">
     <div class="controls">
-      <button id="playBtn" class="btn" title="Afspelen / pauzeren">▶ Afspelen</button>
-      <button id="restartBtn" class="btn" title="Opnieuw vanaf het begin">⟲ Opnieuw</button>
-
-      <label class="dur" for="durSlider">Duur
-        <input type="range" id="durSlider" min="10" max="120" step="5" value="30">
-        <output id="durVal" for="durSlider">30</output> s
-      </label>
-
       <span class="colors">
-        <label class="color" for="lineColor">Lijn
-          <input type="color" id="lineColor" value="#66c0f4" title="Kleur van de lijn, het oppervlak en de balken">
-        </label>
-        <label class="color" for="accentColor">Accent
-          <input type="color" id="accentColor" value="#e74c3c" title="Kleur van de stip en de drukste dag">
+        <label class="color" for="weekdayColor">Color
+          <input type="color" id="weekdayColor" value="#66c0f4" title="Color of the bars of this chart">
         </label>
       </span>
 
-      <button id="exportBtn" class="btn primary" title="De animatie (één volledige cyclus) opnemen en downloaden als MP4">
-        ⬇ Exporteer MP4
-      </button>
-      <span id="exportStatus" class="status" hidden></span>
+      <span class="axisgroup" title="X/Y axis values of this chart (shared with the other charts)">
+        <label class="as-size" for="wdAxisSize">Axis
+          <input type="range" id="wdAxisSize" min="10" max="44" step="1" value="20">
+          <output id="wdAxisSizeVal" for="wdAxisSize">20</output>
+        </label>
+        <label class="tick" for="wdBold">Bold
+          <input type="checkbox" id="wdBold" title="Axis values in bold">
+        </label>
+        <label class="color" for="wdAxisColor">Color
+          <input type="color" id="wdAxisColor" value="#ffffff" title="Color of the axis values">
+        </label>
+        <label class="tick" for="wdYLabel" title="Show the y-axis label (Amount)">Y label
+          <input type="checkbox" id="wdYLabel" checked>
+        </label>
+      </span>
     </div>
 
-    <p class="foot" id="timelineFoot">Laden…</p>
-    <p class="hint">De animatie speelt in real-time af; de MP4-export neemt één volledige cyclus op
-      (houd het tabblad zichtbaar tijdens het opnemen).</p>
-  </section>
-
-  <!-- ===================== Weekday (statisch) ===================== -->
-  <section class="card">
     <div class="canvas-wrap">
       <canvas id="weekdayCanvas" width="1200" height="620"></canvas>
     </div>
 
-    <p class="foot" id="weekdayFoot">Laden…</p>
+    <p class="foot" id="weekdayFoot">Loading…</p>
   </section>
 
 </main>

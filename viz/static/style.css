@@ -87,21 +87,21 @@ main {
   border-radius: 8px;
 }
 
-/* ---- Bediening bovenaan de pagina (250% groter) ---- */
+/* ---- Bediening bovenaan de pagina ---- */
 .controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
-  margin-top: 16px;
+  gap: 10px;
+  margin-top: 10px;
 }
 .btn {
   background: var(--btn-bg);
   border: 2px solid var(--btn-border);
   color: var(--text);
-  border-radius: 18px;
-  padding: 18px 40px;
-  font-size: 36px;
+  border-radius: 9px;
+  padding: 9px 20px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
@@ -120,19 +120,19 @@ main {
 .dur {
   display: inline-flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
   color: var(--text);
-  font-size: 34px;
+  font-size: 17px;
   font-weight: 600;
 }
 .dur input[type="range"] {
-  width: 360px;
-  height: 14px;
+  width: 180px;
+  height: 8px;
   accent-color: var(--ui-accent);
   cursor: pointer;
 }
 .dur output {
-  min-width: 60px;
+  min-width: 30px;
   text-align: right;
   color: var(--ui-accent);
   font-weight: 700;
@@ -141,27 +141,68 @@ main {
 .colors {
   display: inline-flex;
   align-items: center;
-  gap: 22px;
+  gap: 12px;
 }
 .color {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   color: var(--text);
-  font-size: 30px;
+  font-size: 15px;
   font-weight: 600;
 }
 .color input[type="color"] {
-  width: 96px;
-  height: 64px;
-  padding: 4px;
+  width: 48px;
+  height: 32px;
+  padding: 3px;
   background: var(--card);
   border: 2px solid var(--btn-border);
-  border-radius: 12px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
-.status { color: var(--muted); font-size: 26px; }
+.axisgroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.as-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.as-size input[type="range"] {
+  width: 110px;
+  height: 8px;
+  accent-color: var(--ui-accent);
+  cursor: pointer;
+}
+.as-size output {
+  min-width: 24px;
+  text-align: right;
+  color: var(--ui-accent);
+  font-weight: 700;
+}
+.tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tick input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--ui-accent);
+  cursor: pointer;
+}
+
+.status { color: var(--muted); font-size: 13px; }
 
 .foot { margin: 10px 0 0; color: var(--muted); font-size: 16px; }
 .hint { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
