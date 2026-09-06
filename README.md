@@ -132,11 +132,33 @@ python fetch_new_game_info.py --limit 500    # max. 500 games deze run
 python fetch_new_game_info.py --report-only  # alleen tonen wat er zou komen
 python fetch_new_game_info.py --sync-reviews # basis (games.jsonl) bijwerken met
                                              # laatst bekende reviews en stoppen
+python fetch_new_game_info.py --is_free_true # alleen GRATIS games pollen
+python fetch_new_game_info.py --genre_sports # alleen games met genre Sports pollen
+python fetch_new_game_info.py --player-limit 50   # alleen games met gemiddeld
+                                                  # < 50 spelers pollen
 ```
 
 Elke run voegt per game één momentopname toe aan `games_extra_info.jsonl`
 (genummerd `_1`, `_2`, ... per game). Alleen de standaardbibliotheek — geen
 extra packages, geen venv.
+
+**Selectie beperken** — wil je niet alle games pollen, dan kun je de
+selectie filteren (alles combineert met EN):
+- `--player-limit <N>` — alleen games met een **gemiddeld** aantal spelers
+  onder N (bv. voor een video over de minst gespeelde games). Het
+  gemiddelde komt uit de eigen momentopnamen van de game; zonder historie
+  telt de master-snapshot mee. Volgorde wordt dan minste spelers eerst.
+- `--is_free_true` — alleen gratis games (is_free == true). Bewust géén
+  `--is_free_false`: het merendeel van de games is niet gratis, dus dat
+  filter zou bijna alles selecteren.
+- `--genre_<naam>` — dynamische vlaggen, bv. `--genre_sports`,
+  `--genre_indie` of `--genre_rpg`: alleen games waar dat genre in de
+  genres-lijst van de game voorkomt. Hoofdletters, spaties en `&` doen er
+  niet toe (`--genre_action` = 'Action',
+  `--genre_massively_multiplayer` = 'Massively Multiplayer'). Meerdere
+  `--genre_*`-vlaggen = OF (een game met één van de genres telt).
+
+Alle filters zijn combineerbaar met elkaar en met `--limit`/`--random`.
 
 ### 3) GitHub Actions (optioneel): de `RUN_STATUS`-marker
 

@@ -51,6 +51,35 @@ steekproef): dan blijven niet steeds dezelfde top-games vooraan staan en
 wordt ook een game die ver achteraan staat (bv. op plek 50.000) regelmatig
 bijgewerkt.
 
+Met --player-limit <N> wordt de selectie gefilterd op games met WEINIG
+spelers (bv. voor een video over de minst gespeelde games): per game wordt
+het GEMIDDELDE last_seen_player_count over zijn eigen
+games_extra_info-regels berekend (regels zonder int-waarde tellen niet
+mee). Heeft een game nog geen extra-info-regels, dan telt de master-snapshot
+(last_seen_player_count in games.jsonl) als enige steekproef. Alleen games
+met een gemiddelde ONDER N worden deze run bijgewerkt; games zonder enige
+spelerswaarde (geen publieke Steam-data) worden overgeslagen (null is
+onbekend, geen 0). De volgorde wordt dan oplopend op dat gemiddelde (minste
+spelers eerst), zodat een run met --limit altijd de laagste games als eerste
+ververst; combineerbaar met --random (dan wordt de gefilterde selectie
+gemixt).
+
+Naast --player-limit zijn er twee vlaggen om op andere eigenschappen te
+filteren (alles combineert met EN):
+- --is_free_true: alleen GRATIS games bijwerken (is_free == true in de
+  master). Bewust GEEN --is_free_false: het merendeel van de games is niet
+  gratis, dus dat filter zou bijna de hele catalogus selecteren.
+- --genre_<naam>: alleen games bijwerken waarbij dat genre in de genres-
+  lijst van de game voorkomt (bv. --genre_sports of --genre_indie). Een
+  game met meerdere genres telt mee zodra het genre er een van is. Spaties,
+  hoofdletters en '&' doen er niet toe: --genre_action matcht 'Action',
+  --genre_massively_multiplayer matcht 'Massively Multiplayer' en
+  --genre_design_illustration matcht 'Design & Illustration'. Meerdere
+  --genre_*-vlaggen = OF (een game met een van de opgegeven genres telt).
+  Deze vlaggen zijn dynamisch (argparse kent geen vaste genrenamen): ze
+  worden vóór het parsen uit de commandoregel gehaald (split_genre_flags)
+  en genormaliseerd met genre_key (lowercase + niet-alfanumeriek weg).
+
 Anders dan fetch_games_initial wordt er dus NIET geskipt op bekende appids,
 niet gededuped en niet geblacklist: elke run telt. Geen API key nodig (dit
 script haalt alleen de (keyless) store-, spelersaantal- en review-data op
@@ -63,6 +92,16 @@ Gebruik:
     python fetch_new_game_info.py --random    # elke run een willekeurige selectie appids,
                                               # zodat niet steeds dezelfde top-games worden
                                               # bijgewerkt (combineerbaar met --limit)
+    python fetch_new_game_info.py --player-limit 50  # alleen games met een GEMIDDELD aantal
+                                                     # spelers < 50 bijwerken (video over de
+                                                     # minst gespeelde games; combineerbaar
+                                                     # met --limit en --random)
+    python fetch_new_game_info.py --is_free_true     # alleen GRATIS games bijwerken
+    python fetch_new_game_info.py --is_free_true --player-limit 50 #gratis games en filter op max 50 gemiddelde spelers
+    python fetch_new_game_info.py --genre_sports     # alleen games met genre Sports bijwerken
+                                                     # (elke dynamische --genre_<naam> werkt;
+                                                     # meerdere --genre_*-vlaggen = OF)
+    python fetch_new_game_info.py --genre_sports --player-limit 50 #sports genre games met gemiddeld max 50 spelers
     python fetch_new_game_info.py --max-duration-minutes 30 # netjes stoppen ~5 min vóór
                                                   # de step-timeout (GitHub Action)
     python fetch_new_game_info.py --sync-reviews  # basis (games.jsonl) bijwerken met de
@@ -231,6 +270,30 @@ def backoff_seconds(attempt, code):
 
 def random_jitter(jitter):
     return random.uniform(0, jitter)
+
+
+def genre_key(name):
+    """Normaliseer een genrenaam voor vergelijking: lowercase + alle niet-
+    alfanumerieke tekens weg (spaties, '&', underscores, ...). Zo matchen
+    --genre_action en 'Action' elkaar, --genre_massively_multiplayer matcht
+    'Massively Multiplayer' en --genre_design_illustration matcht 'Design &
+    Illustration' (zonder dat '&' in de shell gequote hoeft te worden)."""
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+def split_genre_flags(argv):
+    """Argparse kent geen dynamische opties: haal alle --genre_<naam>-
+    vlaggen uit de commandoregel vóór het parsen (anders faalt parse_args op
+    onbekende opties). Retourneert (overige_argv, genre_vlaggen) met de
+    vlaggen in de oorspronkelijke volgorde; lege namen (--genre_) worden
+    genegeerd."""
+    remaining, flags = [], []
+    for arg in argv:
+        if arg.startswith("--genre_") and len(arg) > len("--genre_"):
+            flags.append(arg[len("--genre_"):])
+        else:
+            remaining.append(arg)
+    return remaining, flags
 
 
 def load_us_region_blocked(data_dir):
@@ -406,11 +469,14 @@ def load_master(path):
 
 def load_extra_info(path):
     """Lees games_extra_info*.jsonl (alle delen samengevoegd, in
-    volgorde). Retourneert (counts, last_players, latest_reviews): per
-    appid het aantal regels, het laatste bekende spelersaantal én de
+    volgorde). Retourneert (counts, last_players, avg_players,
+    latest_reviews): per appid het aantal regels, het laatste bekende
+    spelersaantal, het GEMIDDELDE spelersaantal (over alle regels van die
+    game met een int-waarde; voor --player-limit) én de
     review-samenvatting van de LAATSTE regel over alle delen heen (die
     wint - om games.jsonl bij te werken met de laatst bekende data)."""
     counts, last_players, latest_reviews = {}, {}, {}
+    player_sums, player_samples = {}, {}
     for line in iter_lines(path):
         line = line.strip()
         if not line:
@@ -424,9 +490,15 @@ def load_extra_info(path):
         pc = r.get("last_seen_player_count")
         if isinstance(pc, int):
             last_players[aid] = pc
+            player_sums[aid] = player_sums.get(aid, 0) + pc
+            player_samples[aid] = player_samples.get(aid, 0) + 1
         if any(r.get(k) is not None for k in REVIEW_KEYS):
             latest_reviews[aid] = {k: r.get(k) for k in REVIEW_KEYS}
-    return counts, last_players, latest_reviews
+    # Gemiddelde over de regels met een int-waarde; regels met null (geen
+    # publieke data) tellen niet mee (null is onbekend, geen 0).
+    avg_players = {aid: player_sums[aid] / player_samples[aid]
+                   for aid in player_samples}
+    return counts, last_players, avg_players, latest_reviews
 
 
 def apply_latest_reviews(master, latest_reviews):
@@ -459,11 +531,26 @@ def write_master(path, master):
 #  Main                                                                        #
 # --------------------------------------------------------------------------- #
 def main(argv=None):
+    # --genre_<naam>-vlaggen zijn dynamisch (argparse kent geen vaste lijst
+    # van genrenamen): haal ze er vóór het parsen uit, zie split_genre_flags.
+    argv, genre_flags = split_genre_flags(
+        sys.argv[1:] if argv is None else argv)
     p = argparse.ArgumentParser(
         description="EXTRA INFO: per run een extra regel per game toevoegen "
                     "aan games_extra_info.jsonl (was player_history.jsonl: "
                     "zelfde velden + last_seen_player_count + doorlopende "
-                    "appid_amount vanaf _1 per game). Geen API key nodig.")
+                    "appid_amount vanaf _1 per game). Geen API key nodig.",
+        epilog="Selectievlaggen (combineerbaar; alles geldt tegelijk):\n"
+               "  --player-limit <N>   alleen games met GEMIDDELD < N spelers\n"
+               "  --is_free_true       alleen GRATIS games (is_free=true)\n"
+               "  --genre_<naam>       dynamisch: bv. --genre_sports,\n"
+               "                       --genre_indie of --genre_rpg: alleen\n"
+               "                       games waar dat genre in voorkomt\n"
+               "                       (spaties/& mogen ontbreken: bv.\n"
+               "                       --genre_massively_multiplayer matcht\n"
+               "                       'Massively Multiplayer'); meerdere\n"
+               "                       --genre_*-vlaggen = OF (een game met\n"
+               "                       een van de genres telt)")
     p.add_argument("--data-dir", default="data",
                    help="map voor master + extra-info (default: data)")
     p.add_argument("--master", default=None,
@@ -486,6 +573,23 @@ def main(argv=None):
                         "meeste spelers eerst (--limit blijft werken): zo "
                         "worden niet steeds dezelfde populairste games "
                         "bijgewerkt, maar ook ver achteraan staande games")
+    p.add_argument("--player-limit", type=int, default=None,
+                   help="alleen games bijwerken met een GEMIDDELD aantal "
+                        "spelers ONDER deze limiet (voor een video over de "
+                        "minst gespeelde games). Het gemiddelde komt uit de "
+                        "eigen games_extra_info-regels van de game (regels "
+                        "zonder waarde tellen niet mee); zonder historie "
+                        "telt de master-snapshot uit games.jsonl mee. Games "
+                        "zonder enige spelersdata worden overgeslagen. "
+                        "Volgorde wordt dan minste spelers eerst "
+                        "(combineerbaar met --limit en --random)")
+    p.add_argument("--is_free_true", action="store_true",
+                   help="alleen GRATIS games bijwerken (is_free == true in "
+                        "de master). Bewust geen --is_free_false: het "
+                        "merendeel van de games is niet gratis, dus dat "
+                        "filter zou bijna de hele catalogus selecteren. "
+                        "Combineerbaar met --player-limit, --genre_*, "
+                        "--limit en --random")
     p.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                    help=f"seconden rust tussen twee requests "
                         f"(default: {DEFAULT_DELAY})")
@@ -511,6 +615,16 @@ def main(argv=None):
                         "keihard afgekapt te worden. Zonder deze optie "
                         "draait het onbeperkt.")
     args = p.parse_args(argv)
+    # Genre-vlaggen: bewaard voor de meldingen (oorspronkelijke
+    # schrijfwijze, zonder dubbelen) en genormaliseerd voor de matching.
+    args.genre_flags = []
+    args.genres = set()
+    for _f in genre_flags:
+        if _f not in args.genre_flags:
+            args.genre_flags.append(_f)
+        _k = genre_key(_f)
+        if _k:
+            args.genres.add(_k)
 
     data_dir = os.path.abspath(args.data_dir)
     master_path = (os.path.abspath(args.master) if args.master
@@ -523,7 +637,8 @@ def main(argv=None):
         print(f"! Geen games gevonden in {master_path}. Draai eerst "
               "fetch_games_initial.py om de masterlijst op te bouwen.")
         sys.exit(1)
-    extra_counts, extra_last, latest_reviews = load_extra_info(extra_path)
+    extra_counts, extra_last, avg_players, latest_reviews = \
+        load_extra_info(extra_path)
     us_blocked = load_us_region_blocked(data_dir)
 
     # --sync-reviews: de basis (games.jsonl, 1 record per game) bijwerken
@@ -554,12 +669,77 @@ def main(argv=None):
 
     ordered_ids = sorted(master,
                          key=lambda a: (-order_score(a), a))
-    # --random: de volgorde wordt elke run opnieuw gemixt (uniforme
-    # willekeurige steekproef). Zo blijven niet steeds dezelfde populairste
-    # games vooraan staan en wordt ook iets op plek 50.000 regelmatig
-    # bijgewerkt. Zonder --random: meeste spelers eerst.
+
+    # Selectiefilters. Alles combineert met EN; meerdere --genre_*-vlaggen
+    # zijn OF binnen de genres. Beschikbare filters:
+    #   --player-limit <N> -> alleen games met een GEMIDDELD aantal spelers
+    #      onder N. Het gemiddelde komt uit de eigen games_extra_info-regels
+    #      van de game (regels met null tellen niet mee); zonder historie
+    #      telt de master-snapshot (last_seen_player_count in games.jsonl)
+    #      als enige steekproef. Games zonder ENIGE spelerswaarde (geen
+    #      publieke Steam-data) worden overgeslagen: null is onbekend, geen 0.
+    #   --is_free_true      -> alleen gratis games (is_free == true in de
+    #      master). Bewust geen --is_free_false: het merendeel van de games
+    #      is niet gratis, dus dat filter zou bijna alles selecteren.
+    #   --genre_<naam>      -> alleen games waarbij dat genre voorkomt in de
+    #      genres-lijst van de game (een game met meerdere genres telt mee
+    #      zodra het genre er een van is).
+    def reference_players(aid):
+        val = avg_players.get(aid)
+        if val is not None:
+            return val
+        mval = master[aid].get("last_seen_player_count")
+        return float(mval) if isinstance(mval, int) else None
+
+    def matches_selection(aid):
+        rec = master[aid]
+        if args.player_limit is not None:
+            val = reference_players(aid)
+            if val is None or val >= args.player_limit:
+                return False
+        if args.is_free_true and not rec.get("is_free"):
+            return False
+        if args.genres:
+            game_keys = {genre_key(g) for g in rec.get("genres") or []}
+            if not (game_keys & args.genres):
+                return False
+        return True
+
+    selected_ids = [aid for aid in ordered_ids if matches_selection(aid)]
+
+    # Aantallen per filter (voor de meldingen): elke filter telt
+    # onafhankelijk van de andere, zodat elke melding zijn eigen selectie
+    # toont; de combinatie staat in de samenvattingsregel hieronder.
+    under_count = unknown_count = None
+    if args.player_limit is not None:
+        under_count, unknown_count = 0, 0
+        for aid in ordered_ids:
+            val = reference_players(aid)
+            if val is None:
+                unknown_count += 1
+            elif val < args.player_limit:
+                under_count += 1
+    free_count = None
+    if args.is_free_true:
+        free_count = sum(1 for rec in master.values() if rec.get("is_free"))
+    genre_counts = []
+    for _f in args.genre_flags:
+        _key = genre_key(_f)
+        genre_counts.append(
+            (_f, sum(1 for rec in master.values()
+                     if any(genre_key(g) == _key
+                            for g in rec.get("genres") or []))))
+
+    # Volgorde: zonder --random meeste spelers eerst (uit ordered_ids), met
+    # --player-limit minste spelers eerst (oplopend op gemiddelde: met
+    # --limit pakt de run dan altijd de laagste games als eerste), met
+    # --random willekeurig gemixt (uniforme steekproef: zo blijven niet
+    # steeds dezelfde top-games vooraan staan en wordt ook iets op plek
+    # 50.000 regelmatig bijgewerkt).
+    if args.player_limit is not None:
+        selected_ids.sort(key=lambda a: (reference_players(a), a))
     if args.random:
-        random.shuffle(ordered_ids)
+        random.shuffle(selected_ids)
 
     print("\n=== SteamDataOfficial: extra info per game ===")
     print(f"Games in de master          : {len(master)}")
@@ -569,13 +749,39 @@ def main(argv=None):
           f"{sum(extra_counts.values())} regels")
     if args.random:
         print("Volgorde                    : willekeurig (--random)")
+    elif args.player_limit is not None:
+        print("Volgorde                    : minste spelers eerst "
+              "(--player-limit)")
     else:
         print("Volgorde                    : meeste spelers eerst")
+    if args.player_limit is not None:
+        print(f"> --player-limit {args.player_limit}: alleen games met een "
+              f"gemiddeld spelersaantal < {args.player_limit} worden "
+              f"bijgewerkt ({under_count} games; {unknown_count} zonder "
+              "enige spelersdata overgeslagen).")
+    if args.is_free_true:
+        print(f"> --is_free_true: alleen GRATIS games worden bijgewerkt "
+              f"({free_count} games).")
+    for _f, _cnt in genre_counts:
+        print(f"> --genre_{_f}: alleen games met genre '{_f}' worden "
+              f"bijgewerkt ({_cnt} games).")
+    n_filters = sum((args.player_limit is not None,
+                     args.is_free_true, bool(args.genres)))
+    # De gezamenlijke selectie tonen zodra er meerdere filtervlaggen tegelijk
+    # actief zijn (bv. --genre_a --genre_b = OF, of --is_free_true +
+    # --genre_x = EN): dan is het totaal niet uit een enkele melding af te
+    # lezen. Bij één filter zegt de eigen melding al hoeveel games dat zijn.
+    if n_filters and (n_filters > 1 or len(args.genre_flags) > 1):
+        print(f"> Samen na alle filters: {len(selected_ids)} games.")
+    if n_filters and not selected_ids:
+        print("\n> Geen games voldoen aan de actieve selectie. Draai het "
+              "script zonder filters of verruim ze.")
+        return
 
     lim = args.limit or None
-    selected = ordered_ids
-    if lim is not None and len(ordered_ids) > lim:
-        selected = ordered_ids[:lim]
+    selected = selected_ids
+    if lim is not None and len(selected_ids) > lim:
+        selected = selected_ids[:lim]
         print(f"> Beperkt tot {lim} games deze run (--limit); de rest komt "
               "de volgende run aan de beurt.")
 
