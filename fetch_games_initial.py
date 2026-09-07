@@ -174,6 +174,36 @@ DEFAULT_RETRIES = 6            # pogingen per appid bij throttling/fouten
 # timeout hem keihard zou afkappen (laatste records netjes weggeschreven).
 GRACEFUL_STOP_MARGIN_MINUTES = 5
 
+# Waarom blokt Steam (even)?  ->  bijna elke run krijgt vroeg of laat HTTP
+# 429-throttling te zien:
+#   - Steam throttlet per IP: na ~250 requests (~2,5 min op dit tempo) gaat
+#     de Storefront-API tijdelijk HTTP 429 teruggeven ("te veel requests").
+#     Dat is normaal en meestal van korte duur: de retry/backoff in
+#     fetch_store_batch (6 pogingen, 429: 30s -> 60s -> 120s -> 240s -> 300s
+#     cap) wacht die piek gewoon uit en de volgende poging lukt. Daarom
+#     draaiden de eerdere runs (dezelfde code!) urenlang goed.
+#   - GitHub-hosted runners gebruiken gedeelde datacenter-IP's waar HONDERDEN
+#     andere gebruikers tegelijk van profiteren. Zulke IP-range's blokt Steam
+#     eerder en soms HARDER dan een thuis-IP (hele range tijdelijk geblokt,
+#     niet alleen 'even rustig'). Een request telt pas als 'failed' als ALLE
+#     6 pogingen + de volledige backoff (bij 429 samen tot ~17,5 min wachten)
+#     mislukt zijn - dat betekent dus een blokkade die láng aanhield.
+#   - Waarschijnlijke oorzaak van run #8 (2026-09-07): het runner-IP was op
+#     dat moment (hard) geblokt/throttled, de allereerste request mislukte na
+#     alle pogingen, en de oude 'hele batch mislukt'-check stopte daardoor de
+#     héle 5-uur-run na 1 appid. Elke run krijgt een VERS runner-IP, dus een
+#     volgende run pakt gewoon weer op.
+
+# Pas na ZOVEEL opeenvolgend mislukte storefront-requests stopt de run
+# (echte langdurige blokkade van het IP). Vroeger stopte AL een 'hele batch
+# mislukt' de run - maar met STORE_BATCH=1 IS één appid al een hele batch,
+# dus abortte één (na 6 pogingen + backoff mislukte) request de hele
+# 5-uur-run (bug 2026-09-07, run #8: 'Failed 1' + RUN_STATUS=partial na 1
+# appid). Eén mislukte request is op zich geen probleem (die appid blijft
+# 'nieuw' en een volgende run probeert hem opnieuw) - pas een reeks
+# opeenvolgende wijst op een blokkade die langer duurt dan de run waard is.
+CONSECUTIVE_FAIL_STOP = 3
+
 stop_requested = False
 
 
@@ -1155,6 +1185,7 @@ def main(argv=None):
 
     games_file = RotatingAppend(out_path, log=print)
     processed = 0
+    consecutive_failures = 0   # opeenvolgend mislukte requests deze run
 
     def save_new_game(info, aid, note=""):
         """Schrijf een nieuw slank record naar games.jsonl en werk de
@@ -1295,11 +1326,27 @@ def main(argv=None):
                     stats["failed"] += 1
 
             processed += len(batch)
-            if all(o == "failed" for _, o, _ in results):
-                # hele batch mislukt (throttling/netwerk) -> stoppen; deze
-                # appids blijven 'nieuw' voor de volgende run.
-                print("> Hele batch mislukt (throttling/netwerk) - stop deze "
-                      "run; draai het script later opnieuw.")
+            # Opeenvolgend mislukte requests tellen. Vroeger stopte een
+            # 'hele batch mislukt' de run direct - maar met STORE_BATCH=1 is
+            # één appid al een hele batch, dus abortte één (na alle pogingen
+            # mislukte) request de héle 5-uur-run (bug 2026-09-07). Nu pas
+            # stoppen na een lange reeks opeenvolgende fouten (echte
+            # throttling/blokkade van het runner-IP).
+            n_failed = sum(1 for _, o, _ in results if o == "failed")
+            if n_failed == len(results):
+                consecutive_failures += n_failed
+            else:
+                consecutive_failures = 0
+            if n_failed:
+                failed_aids = ", ".join(
+                    str(a) for a, o, _ in results if o == "failed")
+                print(f"   ! request(s) {failed_aids} definitief mislukt na "
+                      f"{args.max_retries} pogingen (netwerk/429) - blijft "
+                      "'nieuw' voor een volgende run")
+            if consecutive_failures >= CONSECUTIVE_FAIL_STOP:
+                print(f"> {consecutive_failures} opeenvolgende requests "
+                      "mislukt (throttling/netwerk) - stop deze run; draai "
+                      "het script later opnieuw.")
                 break
 
             if processed % 25 == 0:
