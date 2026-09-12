@@ -75,6 +75,33 @@ def part_path(base_path, index):
     return f"{stem}_{index}{ext}"
 
 
+# 'Unusual line terminators' (U+0085 NEL, U+2028 Line Separator,
+# U+2029 Paragraph Separator). Sommige Steam-titels bevatten zulke tekens
+# (appid 4021670 was "Group\u2028Chaos\u2028Bottaring"); in de Steam-store
+# zie je daar gewoon spaties. Zulke tekens zijn geldige JSON, maar:
+#   * editors zoals VS Code melden "unusual line terminators" en bieden
+#     zelfs aan ze te VERWIJDEREN (dat breekt de JSON-string!);
+#   * tools die op Unicode-regelgrenzen splitsen (str.splitlines(),
+#     JavaScript < ES2019, sommige CSV/regex-tools) zien zo'n record als
+#     meerdere regels -> de JSONL valt dan uit elkaar.
+# Daarom vervangt de schrijver ze door een gewone spatie (precies wat de
+# Steam-store toont) - zie normalize_line_terminators().
+UNUSUAL_TERMINATORS = ("\u0085", "\u2028", "\u2029")
+
+
+def normalize_line_terminators(text):
+    """Vervang NEL/LS/PS door een gewone spatie (zelfde beeld als de
+    Steam-store: "Group Chaos Bottaring").
+
+    Wordt door de schrijver (RotatingAppend.write_line) automatisch op elke
+    jsonl-regel toegepast, zodat dit nooit meer in de data terechtkomt."""
+    if "\u2028" not in text and "\u2029" not in text and "\u0085" not in text:
+        return text
+    for ch in UNUSUAL_TERMINATORS:
+        text = text.replace(ch, " ")
+    return text
+
+
 def existing_parts(base_path):
     """Alle bestaande delen van een dataset, gesorteerd op deelnummer.
     Retourneert [(index, pad), ...]; deel 1 = het basisbestand."""
@@ -204,7 +231,11 @@ class RotatingAppend:
 
     def write_line(self, line):
         """Schrijf één regel (zonder verplichte \n) naar het actieve deel;
-        roteert eerst als die regel het deel boven de grens zou tillen."""
+        roteert eerst als die regel het deel boven de grens zou tillen.
+
+        Eventuele LS/PS/NEL-tekens (bv. uit een Steam-titel) worden hier
+        vervangen door een spatie - zie normalize_line_terminators()."""
+        line = normalize_line_terminators(line)
         line = line if line.endswith("\n") else line + "\n"
         size = self._size()
         if size > 0 and size + len(line.encode("utf-8")) > self.rotate_bytes:
