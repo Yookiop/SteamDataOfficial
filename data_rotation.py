@@ -222,10 +222,11 @@ class RotatingAppend:
                 "delen van ~90 MB (de limiet). Verwijder oude delen of "
                 "verhoog MAX_PARTS in data_rotation.py.")
         self._f.close()
+        locked = self.path
         self.index += 1
         self.path = part_path(self.base_path, self.index)
         self._f = open(self.path, "a", encoding="utf-8")
-        self.log(f"> {os.path.basename(self.path)} is ~90 MB groot en is "
+        self.log(f"> {os.path.basename(locked)} is ~90 MB groot en is "
                  f"gelockt - verder in deel {self.index} "
                  f"({os.path.basename(self.path)}).")
 
