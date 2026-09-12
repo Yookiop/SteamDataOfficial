@@ -194,6 +194,15 @@ geweest, wordt in fase 2 en 3 overgeslagen. `--limit` wordt in deze modus
 in **één job met twee stappen** en een **dynamisch tijdsbudget** (niets
 hardcoded):
 
+> **Schema (sinds 2026-09-12):** de workflow draait **automatisch 3× per
+> dag** — 01:00, 09:00 en 17:00 NL-tijd. GitHub cron werkt in **UTC** en kent
+> geen zomertijd (in de winter schuift alles 1 uur op), en het schema werkt
+> alleen als dit bestand op de **default branch (main)** staat. Handmatig
+> starten blijft mogelijk: Actions → *Nightly fetch new game info* → *Run
+> workflow*. De repo is public, dus Actions-minuten zijn gratis; de runs
+> zitten 8 uur uit elkaar en duren max ~5,5 uur, dus ze overlappen elkaar
+> nooit.
+
 1. **bulk** — `fetch_games_initial.py`, budget `RUN_BUDGET_MIN` (330 min),
    checkpoint-commit elke 5 minuten. Zodra de catalogus compleet is print
    het script `Successfully processed all initial games` (+

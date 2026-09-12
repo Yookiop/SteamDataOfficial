@@ -38,28 +38,35 @@
 # variables > Actions) with your Steam Web API key
 # (https://steamcommunity.com/dev/apikey).
 #
-# No active cron schedule by default: trigger this workflow yourself
-# (Actions > "Nightly fetch new game info" > Run workflow, also from your
-# phone). A daily 03:00 schedule is ready as a COMMENTED-OUT block in the
-# `on:` section below - just remove the '#' lines to activate it. Every run
-# lasts up to ~6 hours and resumes from the last checkpoint.
+# Runs AUTOMATICALLY 3x per day: 01:00, 09:00 and 17:00 NL time (see the
+# `on:` section below - GitHub cron runs in UTC and ignores DST, so the times
+# shift 1 hour in the winter). You can always start an extra run by hand:
+# Actions > "Nightly fetch new game info" > Run workflow (also from your
+# phone). A run that is still busy is never cancelled - a new run waits for
+# it (concurrency group). Every run lasts up to ~5,5 hours and resumes from
+# the last checkpoint. This repo is PUBLIC, so Actions minutes are free.
 
 name: Nightly fetch new game info
 
 on:
-  workflow_dispatch: # manual only, via the Actions tab
-  # --- OPTIONEEL dagelijks schema (03:00) --------------------------
-  # Activeer door de '#' voor de 2 regels hieronder te verwijderen
-  # (dus 'schedule:' en '- cron: "0 3 * * *"') en te pushen naar de
-  # DEFAULT branch (main). Let op:
-  #  - GitHub Actions draait cron in UTC: 03:00 UTC = 05:00 NL
-  #    zomertijd (CEST) / 04:00 NL wintertijd (CET).
-  #  - Een schedule draait alleen als het workflow-bestand op de
-  #    default branch staat (niet op een feature branch).
-  #  - GitHub kan scheduled runs overslaan na ~60 dagen zonder push
+  workflow_dispatch: # handmatig, via de Actions-tab (kan ook vanaf je telefoon)
+  # 3x per dag: 01:00, 09:00 en 17:00 NL-tijd.
+  # ⚠️ GitHub cron draait in UTC en volgt GEEN zomertijd. Deze tijden zijn
+  # gekozen voor de NL-zomertijd (CEST = UTC+2): 23:00/07:00/15:00 UTC =
+  # 01:00/09:00/17:00 NL. In de winter (CET = UTC+1) schuift alles 1 uur op
+  # naar 00:00/08:00/16:00 NL. Wil je het liefst de WINTERTIJD exact, gebruik
+  # dan "0 0 * * *", "0 8 * * *" en "0 16 * * *".
+  # Let op:
+  #  - Een schedule draait alleen als dít bestand op de DEFAULT branch (main)
+  #    staat, niet op een feature branch.
+  #  - GitHub kan scheduled runs overslaan/uitzetten na ~60 dagen zonder push
   #    in de repo (inactiviteitslimiet voor cron).
-  # schedule:
-  #   - cron: "0 3 * * *"
+  #  - De drie runs zitten 8 uur uit elkaar; een run duurt max ~5,5 uur, dus
+  #    ze overlappen elkaar niet.
+  schedule:
+    - cron: "0 23 * * *" # 01:00 NL (zomertijd)
+    - cron: "0 7 * * *"  # 09:00 NL (zomertijd)
+    - cron: "0 15 * * *" # 17:00 NL (zomertijd)
 
 permissions:
   contents: write # needed to push the data back
