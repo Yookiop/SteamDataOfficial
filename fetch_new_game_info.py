@@ -80,6 +80,24 @@ filteren (alles combineert met EN):
   worden vóór het parsen uit de commandoregel gehaald (split_genre_flags)
   en genormaliseerd met genre_key (lowercase + niet-alfanumeriek weg).
 
+Met --top_bottom_random (bedoeld voor de GitHub Action, altijd samen met
+--max-duration-minutes) wordt het tijdsbudget in DRIE GELIJKE fasen
+verdeeld, elk met een eigen volgorde:
+
+  1. eerst de MEEST populaire games (aflopend op spelersaantal),
+  2. daarna de MINST populaire games (oplopend; games zonder spelerswaarde
+     sluiten de rij, want 'onbekend' is niet hetzelfde als 'weinig spelers'),
+  3. daarna compleet willekeurig.
+
+Is het budget 270 minuten, dan krijgt elke fase dus ~90 minuten (in de
+praktijk iets minder: het script houdt 5 minuten marge aan om netjes af te
+ronden -> ~88 min per fase). Elke game wordt maximaal 1x per run ververst:
+komt hij in een eerdere fase al aan bod, dan wordt hij in een latere fase
+overgeslagen. --limit wordt in deze modus genegeerd (de tijd bepaalt de
+selectie). Voorbeeld:
+
+    python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
+
 Anders dan fetch_games_initial wordt er dus NIET geskipt op bekende appids,
 niet gededuped en niet geblacklist: elke run telt. Geen API key nodig (dit
 script haalt alleen de (keyless) store-, spelersaantal- en review-data op
@@ -104,6 +122,11 @@ Gebruik:
     python fetch_new_game_info.py --genre_sports --player-limit 50 #sports genre games met gemiddeld max 50 spelers
     python fetch_new_game_info.py --max-duration-minutes 30 # netjes stoppen ~5 min vóór
                                                   # de step-timeout (GitHub Action)
+    python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
+                                                  # 3 gelijke tijdblokken: eerst
+                                                  # meest populair, dan minst
+                                                  # populair, dan willekeurig
+                                                  # (~90 min per fase)
     python fetch_new_game_info.py --sync-reviews  # basis (games.jsonl) bijwerken met de
                                                   # laatst bekende reviews en stoppen
 """
@@ -614,6 +637,15 @@ def main(argv=None):
                         "weggeschreven + basis-reviews bijgewerkt), i.p.v. "
                         "keihard afgekapt te worden. Zonder deze optie "
                         "draait het onbeperkt.")
+    p.add_argument("--top_bottom_random", action="store_true",
+                   help="ververs het tijdsbudget in 3 GELIJKE fasen: eerst de "
+                        "MEEST populaire games, dan de MINST populaire "
+                        "(games zonder spelerswaarde sluiten de rij), dan "
+                        "compleet willekeurig. Vereist --max-duration-minutes "
+                        "(270 min -> 3x ~88 min na aftrek van de marge). Elke "
+                        "game komt max. 1x per run aan bod; --limit wordt "
+                        "genegeerd (de tijd bepaalt de selectie). Bedoeld "
+                        "voor de GitHub Action")
     args = p.parse_args(argv)
     # Genre-vlaggen: bewaard voor de meldingen (oorspronkelijke
     # schrijfwijze, zonder dubbelen) en genormaliseerd voor de matching.
@@ -749,6 +781,9 @@ def main(argv=None):
           f"{sum(extra_counts.values())} regels")
     if args.random:
         print("Volgorde                    : willekeurig (--random)")
+    elif args.top_bottom_random:
+        print("Volgorde                    : 3 fasen (--top_bottom_random): "
+              "meest populair -> minst populair -> willekeurig")
     elif args.player_limit is not None:
         print("Volgorde                    : minste spelers eerst "
               "(--player-limit)")
@@ -778,20 +813,86 @@ def main(argv=None):
               "script zonder filters of verruim ze.")
         return
 
-    lim = args.limit or None
-    selected = selected_ids
-    if lim is not None and len(selected_ids) > lim:
-        selected = selected_ids[:lim]
-        print(f"> Beperkt tot {lim} games deze run (--limit); de rest komt "
-              "de volgende run aan de beurt.")
+    # Duurbudget (--max-duration-minutes): netjes stoppen enkele minuten
+    # vóór de opgegeven grens, zodat de GitHub step-timeout de run niet
+    # keihard afkapt. Het BRUIKBARE budget is de limiet min de marge.
+    t0 = time.monotonic()
+    if args.max_duration_minutes:
+        usable_minutes = max(
+            0.0, args.max_duration_minutes - GRACEFUL_STOP_MARGIN_MINUTES)
+        deadline = usable_minutes * 60.0
+    else:
+        usable_minutes = None
+        deadline = None
+
+    # Fase-plan: normaal 1 fase met de hele selectie; met --top_bottom_random
+    # drie gelijke tijdblokken met elk een eigen volgorde (zie de docstring).
+    # Formaat: [(label|None, appids, einde_in_minuten|None), ...]
+    plan = []
+    share_minutes = None
+    if args.top_bottom_random:
+        if usable_minutes is None:
+            p.error("--top_bottom_random verdeelt het tijdsbudget in 3 "
+                    "gelijke fasen en werkt daarom alleen samen met "
+                    "--max-duration-minutes (bv. 270).")
+        if args.limit:
+            print("> Let op: --limit wordt genegeerd bij "
+                  "--top_bottom_random (de tijd bepaalt de selectie).")
+        share_minutes = usable_minutes / 3.0
+        # Fase 1: meeste spelers eerst (de standaardvolgorde).
+        top_ids = sorted(selected_ids, key=lambda a: (-order_score(a), a))
+        # Fase 2: minste spelers eerst. Games zonder spelerswaarde (null,
+        # order_score -1) sluiten de rij: 'onbekend' is niet hetzelfde als
+        # 'weinig spelers', zo blijven de echte laagvliegers vooraan.
+        bottom_ids = sorted(
+            selected_ids,
+            key=lambda a: (1 if order_score(a) < 0 else 0,
+                           order_score(a), a))
+        # Fase 3: compleet willekeurig.
+        random_ids = list(selected_ids)
+        random.shuffle(random_ids)
+        plan = [("meest populair", top_ids, share_minutes),
+                ("minst populair", bottom_ids, 2 * share_minutes),
+                ("willekeurig", random_ids, 3 * share_minutes)]
+        print(f"> --top_bottom_random: {len(selected_ids)} games in 3 fasen "
+              f"van ~{share_minutes:.0f} min (meest populair -> minst "
+              "populair -> willekeurig).")
+    else:
+        lim = args.limit or None
+        selected = selected_ids
+        if lim is not None and len(selected_ids) > lim:
+            selected = selected_ids[:lim]
+            print(f"> Beperkt tot {lim} games deze run (--limit); de rest "
+                  "komt de volgende run aan de beurt.")
+        plan = [(None, selected, usable_minutes)]
+
+    # Unieke games over alle fasen: elke game komt max. 1x aan bod (wat in
+    # een eerdere fase al ververst is, wordt in een latere fase overgeslagen
+    # via `done_ids` in de lus hieronder).
+    _unique_ids = set()
+    for _label, _ids, _end in plan:
+        _unique_ids.update(_ids)
+    total_planned = len(_unique_ids)
+
+    # Eén platte werkvolgorde over de fasen heen: ALLE fase-lijsten achter
+    # elkaar. Bewust ZONDER dedupe: de fasen bevatten dezelfde games in een
+    # andere volgorde, dus dedupliceren zou fase 2 en 3 leegmaken. Wat al
+    # geweest is, wordt tijdens de run overgeslagen (`done_ids`).
+    sequence = []                      # [(appid, fase-index), ...]
+    for _idx, (_label, _ids, _end) in enumerate(plan):
+        for _aid in _ids:
+            sequence.append((_aid, _idx))
 
     if args.report_only:
-        print("> Zou toevoegen (eerste 30):")
-        for aid in selected[:30]:
-            print(f"   + {aid}  {master[aid].get('name')}  ->  "
-                  f"{next_amount(aid)}")
-        if len(selected) > 30:
-            print(f"   ... en nog {len(selected) - 30} meer")
+        for _idx, (_label, _ids, _end) in enumerate(plan):
+            if _label:
+                print(f"> Fase {_idx + 1} ({_label}): {len(_ids)} games")
+            print("> Zou toevoegen (eerste 30):")
+            for aid in _ids[:30]:
+                print(f"   + {aid}  {master[aid].get('name')}  ->  "
+                      f"{next_amount(aid)}")
+            if len(_ids) > 30:
+                print(f"   ... en nog {len(_ids) - 30} meer")
         print("> --report-only: niets opgehaald/toegevoegd.")
         return
 
@@ -805,27 +906,44 @@ def main(argv=None):
     # rest naar games_extra_info_2.jsonl, _3.jsonl, ... (max _5).
     extra_file = RotatingAppend(extra_path, log=print)
     processed = 0
+    phase_done = {}          # per fase: aantal ververste games (samenvatting)
 
-    # Duurbudget (--max-duration-minutes): netjes stoppen enkele minuten
-    # vóór de opgegeven grens, zodat de GitHub step-timeout de run niet
-    # keihard afkapt.
-    t0 = time.monotonic()
-    if args.max_duration_minutes:
-        deadline = max(0.0, args.max_duration_minutes
-                       - GRACEFUL_STOP_MARGIN_MINUTES) * 60.0
-    else:
-        deadline = None
     try:
-        for aid in selected:
+        cur_phase = None
+        phase_end_min = None
+        done_ids = set()          # al ververst in deze run (max. 1x per game)
+        i = 0
+        while i < len(sequence):
+            aid, phase_idx = sequence[i]
+            i += 1
+
             if stop_requested:
                 break
-            if deadline is not None and (time.monotonic() - t0) >= deadline:
+            if aid in done_ids:
+                continue          # al ververst in een eerdere fase
+            if phase_idx != cur_phase:
+                cur_phase = phase_idx
+                phase_label, _phase_ids, phase_end_min = plan[phase_idx]
+                if phase_label:
+                    print(f"\n--- Fase {phase_idx + 1}/{len(plan)} "
+                          f"({phase_label}) --- tot minuut "
+                          f"{phase_end_min:.0f} van het budget")
+            elapsed = time.monotonic() - t0
+            if deadline is not None and elapsed >= deadline:
                 print("\n> Tijdsbudget bijna op (limiet "
                       f"{args.max_duration_minutes:.0f} min, marge "
                       f"{GRACEFUL_STOP_MARGIN_MINUTES} min) - de run wordt "
                       "netjes afgerond; draai het script opnieuw voor de "
                       "rest.")
                 break
+            if (phase_end_min is not None and cur_phase < len(plan) - 1
+                    and elapsed >= phase_end_min * 60.0):
+                print(f"> Fase {cur_phase + 1} ({plan[cur_phase][0]}) klaar "
+                      f"(minuut {phase_end_min:.0f} voorbij) - door naar de "
+                      "volgende fase.")
+                while i < len(sequence) and sequence[i][1] == cur_phase:
+                    i += 1
+                continue
             if stats["requests"] >= args.max_requests:
                 print(f"\n> Veiligheidslimiet van {args.max_requests} requests "
                       "bereikt. Draai het script opnieuw om verder te gaan.")
@@ -874,12 +992,17 @@ def main(argv=None):
                       f"{record['appid_amount']}  (players: {pc}, reviews: "
                       f"{record.get('review_score_desc')})")
 
+            done_ids.add(aid)
             processed += 1
+            if cur_phase is not None:
+                phase_done[cur_phase] = phase_done.get(cur_phase, 0) + 1
             if processed % 25 == 0:
+                fase_txt = (f"  fase={cur_phase + 1}/{len(plan)}"
+                            if len(plan) > 1 else "")
                 print(f"  [{datetime.now().strftime('%H:%M:%S')}] "
-                      f"verwerkt={processed}/{len(selected)}  "
+                      f"verwerkt={processed}/{total_planned}  "
                       f"requests={stats['requests']}  "
-                      f"toegevoegd={stats['added']}")
+                      f"toegevoegd={stats['added']}{fase_txt}")
 
             if not stop_requested:
                 wait_chunked(args.delay + random_jitter(args.jitter))
@@ -893,10 +1016,14 @@ def main(argv=None):
 
     print("\n=== Samenvatting ===")
     print(f"Games verwerkt deze run     : {processed}")
+    if len(plan) > 1:
+        for _idx, (_label, _ids, _end) in enumerate(plan):
+            print(f"   fase {_idx + 1} ({_label}): "
+                  f"{phase_done.get(_idx, 0)} games ververst")
     print(f"Extra-info-regels toegevoegd: {stats['added']}")
     print(f"Overgeslagen (geen pagina)  : {stats['skipped']}")
-    if len(selected) > processed:
-        print(f"\n> {len(selected) - processed} games nog niet aan bod; draai "
+    if total_planned > processed:
+        print(f"\n> {total_planned - processed} games nog niet aan bod; draai "
               "het script opnieuw voor de volgende.")
 
 

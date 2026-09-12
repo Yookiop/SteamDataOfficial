@@ -136,6 +136,11 @@ python fetch_new_game_info.py --is_free_true # alleen GRATIS games pollen
 python fetch_new_game_info.py --genre_sports # alleen games met genre Sports pollen
 python fetch_new_game_info.py --player-limit 50   # alleen games met gemiddeld
                                                   # < 50 spelers pollen
+python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
+                                             # 3 gelijke tijdblokken (GitHub Action):
+                                             # ~90 min meest populair,
+                                             # ~90 min minst populair,
+                                             # ~90 min willekeurig
 ```
 
 Elke run voegt per game één momentopname toe aan `games_extra_info.jsonl`
@@ -160,18 +165,69 @@ selectie filteren (alles combineert met EN):
 
 Alle filters zijn combineerbaar met elkaar en met `--limit`/`--random`.
 
+**Tijdgestuurde run (GitHub Action): `--top_bottom_random`** — hiermee wordt
+het tijdsbudget in **drie gelijke fasen** verdeeld die elk een andere
+selectie verversen:
+
+1. **meest populair** — aflopend op (laatst bekende) spelersaantal;
+2. **minst populair** — oplopend; games zónder spelerswaarde sluiten de
+   rij, want 'onbekend' is niet hetzelfde als 'weinig spelers';
+3. **willekeurig** — compleet gemixt, zodat ook games ver achteraan in de
+   lijst aan bod komen.
+
+```bash
+python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
+# -> 3 fasen van ~88 min (270 min budget - 5 min marge); bij 300 min: ~98 min per fase
+```
+
+(In de GitHub Action is dit budget **dynamisch**: daar rekent de workflow het
+uit de resterende tijd van het run-budget — zie stap 3 hieronder.)
+
+Elke game wordt **maximaal 1× per run** ververst: wat in fase 1 al is
+geweest, wordt in fase 2 en 3 overgeslagen. `--limit` wordt in deze modus
+**genegeerd** (de tijd bepaalt de selectie); de filters hierboven
+(`--is_free_true`, `--genre_*`, `--player-limit`) blijven gewoon werken.
+
 ### 3) GitHub Actions (optioneel): de `RUN_STATUS`-marker
 
-`.github/workflows/nightly_fetch.yml` doet hetzelfde automatisch op GitHub:
-eerst de bulk (`fetch_games_initial.py`, max 5 uur per run), en alleen als
-de catalogus daarna compleet is ook de extra info. Om nooit keihard te
-worden afgekapt krijgt het script een duurbudget mee
-(`--max-duration-minutes`, gelijk aan de step-timeout) en stopt het zelf
-**~5 minuten eerder, netjes afgerond** (laatste records weggeschreven,
-exit 0).
+`.github/workflows/nightly_fetch.yml` doet hetzelfde automatisch op GitHub,
+in **één job met twee stappen** en een **dynamisch tijdsbudget** (niets
+hardcoded):
+
+1. **bulk** — `fetch_games_initial.py`, budget `RUN_BUDGET_MIN` (330 min),
+   checkpoint-commit elke 5 minuten. Zodra de catalogus compleet is print
+   het script `Successfully processed all initial games` (+
+   `RUN_STATUS=complete`) en is de stap binnen een paar minuten klaar.
+2. **extra info** — `fetch_new_game_info.py --top_bottom_random` met een
+   budget dat de stap **zelf berekent**: `RUN_BUDGET_MIN −
+   RUN_SHUTDOWN_MIN − (tijd die de bulk gebruikte)`. Dat budget wordt in 3
+   gelijke fasen verdeeld (meest populair → minst populair → willekeurig),
+   óók met een checkpoint-commit elke 5 minuten. Draait **alleen** als
+   stap 1 de catalogus écht compleet had; is er te weinig tijd over (< 5
+   min), dan wordt de stap overgeslagen en pakt de volgende run het op.
+
+Het budget staat bovenin de workflow:
+
+```yaml
+env:
+  RUN_BUDGET_MIN: "330"     # totale wall-clock budget van de hele run
+  RUN_SHUTDOWN_MIN: "5"     # laatste minuten: alleen afronden (geen scriptwerk)
+```
+
+Beide scripts stoppen **5 minuten vóór hun eigen budget** (netjes afgerond:
+laatste records weggeschreven, exit 0) en de commit + push komen daarna;
+`RUN_SHUTDOWN_MIN` reserveert die afrondtijd. Zo wordt er nooit midden in
+een regel afgebroken, ook al zit de run tegen de 330 minuten aan (GitHub
+kapt een job hard af bij 360). Door de 5-minuten-checkpoints verlies je bij
+een onverwachte afbreking hooguit ~5 minuten werk.
+
+Rekenvoorbeelden: bulk 5 min → extra krijgt ~325 min (3 fasen van ~108 min);
+bulk 60 min → ~270 min (3 × ~90); bulk 300 min → ~30 min (3 × ~10); bulk
+≥ 325 min → extra overgeslagen.
 
 Als allerlaatste regel print `fetch_games_initial.py` daarom de status
-`RUN_STATUS=...`:
+`RUN_STATUS=...` (bij 'complete' voorafgegaan door de leesbare regel
+`Successfully processed all initial games`):
 
 - `RUN_STATUS=complete` — alle 'nieuwe' appids van deze run zijn verwerkt
   (basis in sync met de API-lijst van dit moment; óók als er niets nieuws
@@ -179,12 +235,13 @@ Als allerlaatste regel print `fetch_games_initial.py` daarom de status
 - `RUN_STATUS=partial` — netjes vroegtijdig gestopt (duurbudget, `--limit`,
   Ctrl+C); er zijn nog 'nieuwe' appids over.
 
-De workflow leest die regel uit de log: alleen bij `complete` draait
-daarna de extra-info-step; bij `partial` doet de job alleen de eindcommit
-en pakt de volgende run de rest op. De status wordt **elke run opnieuw**
-bepaald op basis van wat er nog 'nieuw' is — er wordt niets opgeslagen.
-Komen er later nieuwe games bij via de API, dan is de run waarin ze
-allemaal verwerkt zijn vanzelf weer `complete`.
+De workflow leest die regels uit de log (`Successfully processed all
+initial games` of `RUN_STATUS=complete`): alleen dán draait daarna de
+extra-info-stap; bij `partial` doet de job alleen de eindcommit en pakt de
+volgende run de rest op. De status wordt **elke run opnieuw** bepaald op
+basis van wat er nog 'nieuw' is — er wordt niets opgeslagen. Komen er later
+nieuwe games bij via de API, dan is de run waarin ze allemaal verwerkt zijn
+vanzelf weer `complete`.
 
 ## Output (in `data/`)
 

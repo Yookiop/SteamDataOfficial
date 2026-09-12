@@ -7,13 +7,32 @@
 #     330 min + continue-on-error is only a safety net. During the run a
 #     checkpoint is committed + pushed EVERY 5 MINUTES, so at most ~5 min of
 #     work is in the final commit; the next manual trigger picks up where it
-#     left off. Once everything has been processed, this step finishes in a
-#     few minutes ("no new games") and only then does step 2 run.
-#  2. fetch_new_game_info.py --limit 25000 --random: extra snapshots +
-#     reviews. Only runs when step 1 really completed the whole catalog
-#     (bulk output complete=true). It also stops itself ~5 min before its
-#     own 30-min timeout (--max-duration-minutes). Afterwards everything is
-#     committed + pushed and the job ends.
+#     left off. When the catalog is complete the script prints
+#     'Successfully processed all initial games' (+ RUN_STATUS=complete) and
+#     the step finishes in a few minutes; only then does step 2 run.
+#  2. fetch_new_game_info.py --top_bottom_random: extra snapshots + reviews in
+#     3 EQUAL time blocks (most popular -> least popular -> random, each a
+#     third of the remaining time):
+#       1) the MOST popular games,
+#       2) the LEAST popular games (games without a player count come last:
+#          'unknown' is not the same as 'few players'),
+#       3) completely random.
+#     Each game is refreshed at most once per run. A checkpoint is committed
+#     + pushed every 5 minutes, exactly like step 1. Only runs when step 1
+#     really completed the whole catalog (bulk output complete=true).
+#
+# Time budget (DYNAMIC, nothing hardcoded): this is ONE job and GitHub kills
+# a job after 6 hours (360 min), so the run budgets ITSELF. RUN_BUDGET_MIN
+# (=330, see the env block below) is the wall-clock budget for the whole run;
+# RUN_SHUTDOWN_MIN (=5) is the shutdown window at the end. Both scripts stop
+# themselves 5 min before their own budget (--max-duration-minutes) so they
+# can round off cleanly (files closed, master written) and the commit + push
+# happens after that - nothing is ever killed mid-record. Step 1 gets the
+# full budget, step 2 gets whatever is LEFT (computed in the step itself): on
+# a normal day (few new games) that is nearly the whole budget, on a day with
+# many new games little or nothing - then the next run picks the extra info
+# up again. Thanks to the 5-min checkpoints even a hard job-timeout loses at
+# most ~5 min of work.
 #
 # Requires the GitHub secret "STEAM_API_KEY" (repo Settings > Secrets and
 # variables > Actions) with your Steam Web API key
@@ -45,6 +64,19 @@ on:
 permissions:
   contents: write # needed to push the data back
 
+# Zelf opgelegd wall-clock budget voor de HELE run. GitHub kapt een job na
+# 360 min hard af, dus de run plant zichzelf ruim daaronder:
+#   RUN_BUDGET_MIN   = totale budget van de run in minuten
+#   RUN_SHUTDOWN_MIN = laatste minuten die alleen voor afronden zijn
+# Beide scripts stoppen zelf al 5 min vóór hun eigen budget
+# (--max-duration-minutes, GRACEFUL_STOP_MARGIN_MINUTES) en trekken daarna
+# nog ~1-3 min uit voor het wegschrijven (master/CSV's); daarom komt die 5
+# min er in de extra-info-stap weer bij op. Zo wordt er nooit midden in een
+# regel afgebroken.
+env:
+  RUN_BUDGET_MIN: "330"
+  RUN_SHUTDOWN_MIN: "5"
+
 # Never run two runs at the same time; a running run is not cancelled, a
 # new one waits.
 concurrency:
@@ -54,9 +86,12 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 355 # max runtime of a GitHub-hosted job. Must be ABOVE
-                         # the 355 min of the bulk step so the commit step
-                         # can still run after a step timeout.
+    timeout-minutes: 355 # Hard cap of a GitHub-hosted job is 360 min. So
+                         # bulk (330) + extra (280) do NOT both fit fully:
+                         # step 2 gets the time that is LEFT after step 1
+                         # (normally plenty - up to its full 4,5 uur). The
+                         # 5-min checkpoints in both steps mean a hard job
+                         # timeout loses at most ~5 min of work.
     # API key as job-level env var: the `secrets` context is NOT allowed in
     # an `if:` condition (GitHub error "Unrecognized named-value:
     # 'secrets'"), but it IS allowed in `env`. env.STEAM_API_KEY makes the
@@ -80,9 +115,9 @@ jobs:
       # committed + pushed every 5 minutes. Live progress is in the Actions
       # log (heartbeat + log lines).
       - id: bulk
-        name: Fetch new games (bulk, max 5h, checkpoints every 5 min)
+        name: Fetch new games (bulk, full run budget, checkpoints every 5 min)
         if: ${{ env.STEAM_API_KEY != '' }}
-        timeout-minutes: 330
+        timeout-minutes: 335
         continue-on-error: true
         shell: bash
         run: |
@@ -104,8 +139,8 @@ jobs:
             fi
           }
 
-          echo "> starting fetch_games_initial.py (no --limit, budget 330 min) in the background..."
-          python fetch_games_initial.py --key "$STEAM_API_KEY" --max-duration-minutes 330 > fetch.log 2>&1 &
+          echo "> starting fetch_games_initial.py (no --limit, budget $RUN_BUDGET_MIN min) in the background..."
+          python fetch_games_initial.py --key "$STEAM_API_KEY" --max-duration-minutes "$RUN_BUDGET_MIN" > fetch.log 2>&1 &
           PID=$!
 
           while kill -0 "$PID" 2>/dev/null; do
@@ -119,10 +154,12 @@ jobs:
           commit_checkpoint
           echo "> fetch_games_initial.py finished (exit $status). Last lines of fetch.log:"
           tail -n 5 fetch.log
-          # 'complete' only when the script really processed everything; a
-          # run that stopped early on its time budget prints RUN_STATUS=
-          # partial. This gates the extra-info step below.
-          if grep -q "RUN_STATUS=complete" fetch.log; then
+          # 'complete' only when the script really processed everything: it
+          # then prints 'Successfully processed all initial games' (+ the
+          # machine-readable RUN_STATUS=complete). A run that stopped early
+          # on its time budget prints RUN_STATUS=partial. This gates the
+          # extra-info step below.
+          if grep -qE "Successfully processed all initial games|RUN_STATUS=complete" fetch.log; then
             echo "complete=true" >> "$GITHUB_OUTPUT"
           else
             echo "complete=false" >> "$GITHUB_OUTPUT"
@@ -133,19 +170,85 @@ jobs:
           fi
 
       - id: extra
-        name: Extra info per game (max 30 min)
+        name: Extra info per game (dynamisch budget - 3 fasen top/bottom/random)
         # Only runs when the bulk step actually completed the full catalog
         # (output complete=true); a bulk run that stopped early on its time
-        # budget skips this, so the job just commits and ends. The script
-        # itself stops ~5 min before the 30-min timeout
-        # (--max-duration-minutes). Own timeout + continue-on-error so the
-        # commit step below always runs.
+        # budget skips this, so the job just commits and ends.
+        #
+        # DYNAMIC BUDGET (nothing hardcoded): how long this step may run is
+        # computed from the wall-clock budget of the whole run (RUN_BUDGET_MIN)
+        # minus what the bulk already used, minus the shutdown window. The
+        # script gets that as --max-duration-minutes and stops itself ~5 min
+        # before it; those 5 min are added back here (GRACE_MIN), so all work
+        # really ends at RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN on the clock. If too
+        # little time is left (< MIN_STEP_MIN) the step is skipped and the
+        # next run picks the extra info up.
+        #
+        # --top_bottom_random: 3 equal time blocks (most popular -> least
+        # popular -> random) within that budget. A checkpoint is committed +
+        # pushed every 5 minutes, so even a hard job-timeout loses at most
+        # ~5 min of work. Own timeout + continue-on-error so the commit step
+        # below always runs.
         if: ${{ steps.bulk.outcome == 'success' && steps.bulk.outputs.complete == 'true' }}
-        timeout-minutes: 30
+        timeout-minutes: 335
         continue-on-error: true
-        run: python fetch_new_game_info.py --limit 25000 --random --max-duration-minutes 30
+        shell: bash
+        run: |
+          set -u
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          commit_checkpoint() {
+            git add data/
+            if git diff --cached --quiet; then
+              echo "[$(date -u +'%H:%M:%S')] no changes to commit"
+            else
+              git commit -q -m "data: checkpoint fetch_new_game_info (UTC $(date -u +'%Y-%m-%d %H:%M'))"
+              if git push -q origin HEAD:main; then
+                echo "[$(date -u +'%H:%M:%S')] checkpoint committed + pushed"
+              else
+                echo "[$(date -u +'%H:%M:%S')] push failed - the next checkpoint will retry"
+              fi
+            fi
+          }
+
+          # ---- dynamisch tijdsbudget voor deze stap ---------------------- #
+          GRACE_MIN=5        # marge die het script zelf al van het budget aftrekt
+          MIN_STEP_MIN=5     # minder dan dit over -> stap overslaan
+          start_epoch=$(date -u -d "${{ github.run_started_at }}" +%s)
+          now_epoch=$(date -u +%s)
+          elapsed_min=$(( (now_epoch - start_epoch) / 60 ))
+          left_min=$(( RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN - elapsed_min ))
+          script_min=$(( left_min + GRACE_MIN ))
+          echo "> run-budget ${RUN_BUDGET_MIN} min | bulk gebruikte ~${elapsed_min} min | nog ${left_min} min werk | script-budget ${script_min} min"
+
+          if [ "$left_min" -lt "$MIN_STEP_MIN" ]; then
+            echo "> Te weinig tijd over voor de extra-info-stap (${left_min} min < ${MIN_STEP_MIN} min) - overgeslagen; de volgende run pakt het op."
+            exit 0
+          fi
+
+          echo "> starting fetch_new_game_info.py --top_bottom_random --max-duration-minutes ${script_min} in the background..."
+          python fetch_new_game_info.py --top_bottom_random --max-duration-minutes "$script_min" > extra.log 2>&1 &
+          PID=$!
+
+          while kill -0 "$PID" 2>/dev/null; do
+            sleep 330          # checkpoint every 5 minutes
+            commit_checkpoint
+            echo "--- last lines of extra.log ---"
+            tail -n 3 extra.log
+          done
+          wait "$PID"
+          status=$?
+          commit_checkpoint
+          echo "> fetch_new_game_info.py finished (exit $status). Last lines of extra.log:"
+          tail -n 10 extra.log
+          if [ "$status" -ne 0 ]; then
+            echo "! fetch_new_game_info.py ended with an error - see extra.log above."
+            exit "$status"
+          fi
 
       - name: Commit data changes
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -1159,6 +1159,9 @@ def main(argv=None):
     if not selected:
         print("> Geen nieuwe games: alles uit de API-call staat al in de "
               "output.")
+        # Leesbare regel waarop de GitHub Action grep't (start van de
+        # extra-info-job): de catalogus is compleet.
+        print("Successfully processed all initial games")
         print("RUN_STATUS=complete")
         return
 
@@ -1381,11 +1384,16 @@ def main(argv=None):
     if remaining_new > 0:
         print(f"\n> {remaining_new} appids blijven 'nieuw'; draai het script "
               "opnieuw voor de volgende.")
-    # Machine-leesbare status voor de GitHub Action: 'complete' = alle
-    # appids verwerkt, 'partial' = netjes gestopt vóór alles klaar was
-    # (tijdsbudget/Ctrl+C/limit).
-    print("RUN_STATUS=complete" if remaining_new <= 0
-          else "RUN_STATUS=partial")
+    # Afsluitende statusregels voor de GitHub Action:
+    #   'Successfully processed all initial games' = leesbare regel waarop de
+    #   workflow grep't om de extra-info-job te starten;
+    #   'RUN_STATUS=complete' = alle appids verwerkt, 'partial' = netjes
+    #   gestopt vóór alles klaar was (tijdsbudget/Ctrl+C/limit).
+    if remaining_new <= 0:
+        print("Successfully processed all initial games")
+        print("RUN_STATUS=complete")
+    else:
+        print("RUN_STATUS=partial")
 
 
 if __name__ == "__main__":
