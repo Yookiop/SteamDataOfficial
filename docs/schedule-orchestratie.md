@@ -235,7 +235,51 @@ die dag twee keer gedaan.
 | Vercel / Netlify scheduled functions | ja | ja | logs | gratis tier | kan, maar nieuw account; gratis plannen zijn beperkt in frequentie en aantal — check de actuele limieten |
 | AWS EventBridge Scheduler / Google Cloud Scheduler | ja | ja | logs | ruim binnen gratis laag | prima, maar meer cloud-gedoe voor één POST |
 | VPS met cron | ja | ja | alles | €3-5/mnd | meeste controle, maar wél een machine om te onderhouden |
-| laptop / Taakplanner | "ja" | ja | eigen logs | "gratis" | **afgeraden**: machine moet aan staan, fragiel, en het maakt de cloud afhankelijk van iets lokaals |
+| **Telefoon** (Tasker / Termux / iOS Shortcuts) | ja, maar op een consumenten-OS | ja, maar dan staat de PAT op het toestel | eigen meldingen; geen historie op afstand | gratis | **niet als enige klok**: zelfde klasse fragiliteit als de laptop, alleen met betere uptime. Wel handig als knop of als extra tikbron |
+| laptop / Taakplanner | "ja" | ja | eigen logs | "gratis" | **afgeraden**: machine moet aan staan, fragiel, en het maakt de cloud afhankelijk van iets lokaals. Een telefoon is de betere versie van dit idee, met dezelfde beperkingen |
+
+### Telefoon als klok (Tasker / Termux / iOS Shortcuts)
+
+Een mobiel staat bijna altijd aan, dus de vraag is logisch. Technisch kan het:
+
+* **Tasker (Android)**: een tijdsprofiel + de actie *HTTP Request* (POST naar
+  `.../actions/workflows/<bestand>/dispatches`, header
+  `Authorization: Bearer <PAT>`, body `{"ref":"main"}`).
+* **Termux (Android)**: een echte Linux-omgeving, dus een echte cron
+  (`cronie`/`termux-services`) plus hetzelfde "is het werk gedaan?"-script als de
+  Worker — dat is de betere variant, want idempotent.
+* **iOS Shortcuts**: persoonlijke automatisering *Tijd van de dag* met "Vraag
+  voor uitvoering" uit, en de actie *Get Contents of URL* (POST + headers).
+
+Waarom het tóch **niet als enige klok** moet dienen:
+
+1. **Hetzelfde probleem, ander jasje.** Een telefoon is geen scheduler: Doze /
+   batterij-optimalisatie, agressieve OEM-taakkillers, updates en reboots kunnen
+   je taak uitstellen of helemaal overslaan — precies de "best effort" die we bij
+   GitHub zat waren. Het lijkt betrouwbaar omdat je hem nooit ziet falen.
+2. **Geen historie.** Je krijgt geen log van de planner (Cloudflare geeft die
+   wél: de laatste 100 invocaties). Een gemiste tik blijft dus onzichtbaar.
+3. **Netwerk 's nachts.** Vliegtuigstand of wifi-slaap is een reële faalmodus
+   precies op de momenten waarop je niets merkt.
+4. **De PAT woont dan op het toestel.** Tasker bewaart hem onversleuteld in zijn
+   configuratie; een Shortcut kan hem in de keychain zetten. Een mobiel raak je
+   kwijt of wordt gecompromitteerd — een secret in Cloudflare niet.
+5. **Geen idempotentie.** Een domme cron die mist, mist. De Worker-tik controleert
+   eerst of het werk al gedaan is.
+
+**Waar een telefoon wél goed voor is** (en dit is de aanrader):
+
+* **Als knop.** Een Shortcut of Tasker-knop "Dagrun starten" op je beginscherm die
+  de dispatches doet — één tik in plaats van drie keer inloggen in de Actions-UI.
+  Nog mooier: laat die knop een *eigen* Worker-endpoint aanroepen, dan staat er
+  geen PAT op je telefoon.
+* **Als extra tikbron** naast een cloud-klok, of als herinnering ("start vandaag
+  de runs") met een knop erbij.
+
+Als je de Termux-variant bouwt: gebruik dezelfde regel als de Worker (§9) in
+plaats van een kale cron, zet een wake-lock aan, zet batterij-optimalisatie voor
+Termux uit en laat hem bij een fout een melding geven. En beperk de PAT tot deze
+ene repo met alleen *Actions: read and write*.
 
 ---
 
