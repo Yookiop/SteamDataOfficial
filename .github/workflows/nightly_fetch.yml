@@ -24,7 +24,10 @@
 #              gemiddelde komt uit games.csv + games_extra_info.csv),
 #              waarbij de minst vaak ververste games uit die set voorrang
 #              krijgen;
-#            - 15:00 UTC (17:00 NL) -> --mode random: willekeurige games.
+#            - 15:00 UTC (17:00 NL) -> --mode random --weight-refreshes:
+#              willekeurige games, maar de minst vaak ververste eerst
+#              (binnen elke groep random), zodat elke game op den duur
+#              aan de beurt komt.
 #          Checkpoint-commit + push elke 5 minuten, precies als stap 1.
 #
 # MAX. 1x PER DAG: in ALLE runs wordt een game overgeslagen die op dezelfde
@@ -340,8 +343,17 @@ jobs:
             exit 0
           fi
 
-          echo "> starting fetch_new_game_info.py --mode ${MODE} --max-duration-minutes ${script_min} in the background..."
-          python fetch_new_game_info.py --mode "$MODE" --max-duration-minutes "$script_min" > extra.log 2>&1 &
+          # Bij de random-taak (17:00 NL) wegen we op het aantal keren dat een
+          # game al is ververst: de minst vaak ververste games eerst, binnen
+          # elke groep willekeurig. Zo komt elke game op den duur aan de beurt
+          # i.p.v. dat een uniforme steekproef steeds dezelfde games pakt.
+          WEIGHT_ARGS=""
+          if [ "$MODE" = "random" ]; then
+            WEIGHT_ARGS="--weight-refreshes"
+          fi
+
+          echo "> starting fetch_new_game_info.py --mode ${MODE} ${WEIGHT_ARGS} --max-duration-minutes ${script_min} in the background..."
+          python fetch_new_game_info.py --mode "$MODE" $WEIGHT_ARGS --max-duration-minutes "$script_min" > extra.log 2>&1 &
           PID=$!
 
           while kill -0 "$PID" 2>/dev/null; do

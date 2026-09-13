@@ -146,6 +146,11 @@ python fetch_new_game_info.py --mode least-popular --max-duration-minutes 270
 python fetch_new_game_info.py --mode random --max-duration-minutes 270
                                              # resterende tijd naar willekeurige
                                              # games (17:00 NL-run)
+python fetch_new_game_info.py --limit 3500 --random --weight-refreshes
+                                             # willekeurige games, maar de minst
+                                             # vaak ververste eerst (binnen elke
+                                             # groep random): alle games komen
+                                             # op den duur aan de beurt
 python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
                                              # (oude modus) 3 gelijke tijdblokken
                                              # in één run: ~90 min meest populair,
@@ -218,12 +223,17 @@ van de 3 runs per dag krijgt zo zijn eigen taak:
   is niet hetzelfde als 'weinig spelers'). De grens is aanpasbaar met
   `--least-max-avg <N>`.
 - `--mode random` (17:00 NL) — **willekeurige** games die die dag nog niet aan
-  bod kwamen.
+  bod kwamen. De 17:00-run geeft hier `--weight-refreshes` mee: de volgorde
+  wordt dan gewogen op het **aantal keren dat een game al is ververst** (het
+  aantal `games_extra_info`-regels per appid) — minst vaak ververst eerst, en
+  binnen elke groep willekeurig. Zo komen alle games op den duur ongeveer even
+  vaak aan bod i.p.v. dat een uniforme steekproef steeds dezelfde games pakt.
+  Zonder die vlag is de volgorde puur willekeurig.
 
 ```bash
 python fetch_new_game_info.py --mode popular --max-duration-minutes 270
 python fetch_new_game_info.py --mode least-popular --max-duration-minutes 270
-python fetch_new_game_info.py --mode random --max-duration-minutes 270
+python fetch_new_game_info.py --mode random --weight-refreshes --max-duration-minutes 270
 ```
 
 **Maximaal 1× per dag** — in **alle** modi (ook `--top_bottom_random`) wordt

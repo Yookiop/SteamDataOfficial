@@ -121,7 +121,13 @@ tijdsbudget EEN selectie:
                  ververst. Games zonder enkele spelerswaarde vallen buiten
                  de set ('onbekend' is niet hetzelfde als 'weinig spelers').
 
-  random         compleet willekeurig (uniforme steekproef).
+  random         willekeurig. Met --weight-refreshes wordt de volgorde
+                 gewogen op het AANTAL KEER dat een game al is ververst
+                 (aantal games_extra_info-regels per appid): de minst vaak
+                 ververste games komen eerst, en BINNEN elke groep wordt
+                 willekeurig gemixt. Zo komen alle games op den duur
+                 ongeveer even vaak aan de beurt i.p.v. dat een uniforme
+                 steekproef steeds dezelfde games pakt.
 
 MAX. 1x PER DAG: in ALLE modi (ook --top_bottom_random) wordt een game
 overgeslagen die op dezelfde "run-dag" al is ververst. De run-dag is
@@ -138,7 +144,8 @@ van games die al in de master staan).
 Gebruik:
     python fetch_new_game_info.py             # alle games pollen (meeste spelers eerst)
     python fetch_new_game_info.py --limit 500 # max. 500 games deze run (populairste eerst)
-    python fetch_new_game_info.py --limit 3500 --random # max. 500 games deze run (populairste eerst)
+    python fetch_new_game_info.py --limit 3500 --random # max. 3500 games deze run,
+                                                     # willekeurig gekozen
     python fetch_new_game_info.py --random    # elke run een willekeurige selectie appids,
                                               # zodat niet steeds dezelfde top-games worden
                                               # bijgewerkt (combineerbaar met --limit)
@@ -170,6 +177,11 @@ Gebruik:
                                                   # resterende tijd naar willekeurige
                                                   # games die vandaag nog niet zijn
                                                   # ververst (17:00 NL-run)
+    python fetch_new_game_info.py --limit 1000 --random --weight-refreshes
+                                                  # willekeurige games, maar de minst
+                                                  # vaak ververste eerst (binnen elke
+                                                  # groep random): alle games komen
+                                                  # op den duur aan de beurt
     python fetch_new_game_info.py --sync-reviews  # basis (games.jsonl) bijwerken met de
                                                   # laatst bekende reviews en stoppen
 """
@@ -667,7 +679,13 @@ def main(argv=None):
                "                       --genre_massively_multiplayer matcht\n"
                "                       'Massively Multiplayer'); meerdere\n"
                "                       --genre_*-vlaggen = OF (een game met\n"
-               "                       een van de genres telt)")
+               "                       een van de genres telt)\n"
+               "Modus / overig:\n"
+               "  --mode <naam>        popular | least-popular | random: welke\n"
+               "                       games de resterende tijd krijgen\n"
+               "  --weight-refreshes   bij --mode random/--random: minst vaak\n"
+               "                       ververst eerst, binnen elke groep random\n"
+               "  --ignore-same-day    de 'max. 1x per dag'-regel uitzetten")
     p.add_argument("--data-dir", default="data",
                    help="map voor master + extra-info (default: data)")
     p.add_argument("--master", default=None,
@@ -728,6 +746,16 @@ def main(argv=None):
                         "een game die op DEZELFDE run-dag (UTC+2, dus de 3 "
                         "runs 01:00/09:00/17:00 NL) al is ververst "
                         "overgeslagen, op basis van DataUpdatedAt")
+    p.add_argument("--weight-refreshes", action="store_true",
+                   help="alleen bij --mode random (of --random): weeg de "
+                        "selectie op het AANTAL KEER dat een game al is "
+                        "ververst (aantal games_extra_info-regels per "
+                        "appid). De minst vaak ververste games komen eerst "
+                        "en binnen elke groep wordt willekeurig gemixt, "
+                        "zodat alle games op den duur ongeveer even vaak "
+                        "aan de beurt komen i.p.v. dat een uniforme "
+                        "steekproef steeds dezelfde games pakt. Zonder "
+                        "deze vlag is de volgorde puur willekeurig")
     p.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                    help=f"seconden rust tussen twee requests "
                         f"(default: {DEFAULT_DELAY})")
@@ -854,7 +882,15 @@ def main(argv=None):
         ordered_ids = least_ids
     elif mode == "random":
         ordered_ids = list(master)
-        random.shuffle(ordered_ids)
+        if args.weight_refreshes:
+            # Gewogen: eerst de games die het MINST VAAK zijn ververst
+            # (aantal games_extra_info-regels), en BINNEN elke groep
+            # willekeurig - zo komt elke game op den duur even vaak aan bod
+            # i.p.v. dat een uniforme steekproef steeds dezelfde games pakt.
+            rnd = {aid: random.random() for aid in ordered_ids}
+            ordered_ids.sort(key=lambda a: (extra_counts.get(a, 0), rnd[a]))
+        else:
+            random.shuffle(ordered_ids)
     else:
         ordered_ids = sorted(master,
                              key=lambda a: (-order_score(a), a))
@@ -954,6 +990,9 @@ def main(argv=None):
     if args.player_limit is not None and mode != "least-popular":
         print("Volgorde                    : minste spelers eerst "
               "(--player-limit)")
+    if mode == "random" and args.weight_refreshes:
+        print("Volgorde                    : minst vaak ververst eerst, "
+              "binnen elke groep willekeurig (--weight-refreshes)")
     if args.ignore_same_day:
         print("Max. 1x per dag             : UIT (--ignore-same-day)")
     else:
