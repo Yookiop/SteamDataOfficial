@@ -3,6 +3,8 @@
 > **Status: concept / nog niet geïmplementeerd** — 13-09-2026
 > Doel: de dagtaken betrouwbaar op tijd starten **zonder** GitHub's planner
 > (die "best effort" is) en **zonder** een laptop die 24/7 aan moet staan.
+> **Voorlopig bedrijf (komende weken): handmatig starten** — zie §5. Cloudflare
+> staat op de planning voor "op termijn", niet voor nu.
 
 Dit document heette eerder `cloudflare-trigger.md`. Het gaat over **waar de klok
 woont en waar de orchestration-logica woont**. Cloudflare Workers is de gekozen
@@ -141,7 +143,8 @@ Redenen om **geen enkele** GitHub-cron meer te gebruiken:
    zegt "dit moet om 20:35 gebeuren"; een cron in de orchestrator zegt hetzelfde.
    Twee plekken die hetzelfde beweren, is de situatie die we weghalen.
 3. **De planner concurreert met het werk.** Een late tik viel eerder bovenop een
-   run van 4 uur (`concurrency`), met gemeten wachttijden van 191 en 98 minuten.
+   run van 4-5,5 uur (`concurrency`), met gemeten wachttijden van 191 en 98
+   minuten.
    Een klok buiten GitHub heeft dat probleem niet.
 
 **Wat er op 13-09-2026 is doorgevoerd:**
@@ -157,8 +160,33 @@ Redenen om **geen enkele** GitHub-cron meer te gebruiken:
 automatisch. Handmatig werkt alles nog: Actions > de workflow > *Run workflow*
 (`workflow_dispatch`). Dat is de prijs van één klok, en het is tijdelijk.
 
-**Wat GitHub blijft doen:** rekenkracht (de runs van ~4 uur) en de plek waar de
-code en de data staan. Alleen het *timen* halen we er weg.
+**Wat GitHub blijft doen:** rekenkracht (de runs van ~5,5 uur) en de plek waar
+de code en de data staan. Alleen het *timen* halen we er weg.
+
+### Voorlopig bedrijf (komende weken): handmatig
+
+Zolang de orchestrator er niet is, worden de taken met de hand gestart:
+
+| wanneer | wat | max duur |
+|---|---|---|
+| 's ochtends, direct na elkaar | `1_most_popular` + `2_least_popular` | 5,5 uur per stuk |
+| 's avonds | `3_random` | 5,5 uur |
+
+Wat er dan gebeurt: de eerste run gaat draaien, de tweede blijft **`pending`**
+staan en start automatisch zodra de eerste klaar is. Dat doet de
+`concurrency`-groep (`steam-data-fetch` + `queue: max`): runs in dezelfde groep
+gaan nooit gelijktijdig, en met `queue: max` wordt een wachtende run **niet**
+geannuleerd (dat is juist het verschil met de standaard `queue: single`). In de
+Actions-lijst staat hij als *Waiting / Pending*.
+
+Twee dingen om in de gaten te houden:
+
+* **De som.** 5,5 + 5,5 + 5,5 = **maximaal ~16,5 uur** werk op één dag. Start de
+  ochtendronde dus vroeg genoeg, anders schuift de avondrun de nacht in.
+* **Het plafond is geen vaste duur.** `RUN_BUDGET_MIN=330` is een maximum: is de
+  bulk-fetch klaar of is er weinig te verwerken, dan stopt een run vanzelf
+  eerder. Wat er echt gedraaid is, zie je in de slot-samenvatting van de run
+  (per stap `outcome`/`conclusion` + de totale looptijd).
 
 ---
 
@@ -212,9 +240,10 @@ De taken staan in de orchestrator geconfigureerd (bestand + gewenste NL-tijd):
 | 2_least_popular | `2_least_popular.yml` | 04:35 | `35 4 * * *` + `timezone: Europe/Amsterdam` |
 | 3_random | `3_random.yml` | 12:35 | `35 12 * * *` + `timezone: Europe/Amsterdam` |
 
-De taken staan 8 uur uit elkaar en elke run heeft een budget van 4 uur
-(`RUN_BUDGET_MIN=240`, job-timeout 260 min). Daardoor kan een late start de
-volgende taak niet in de weg lopen.
+De taken staan niet meer op vaste 8-uursafstand: ze worden (voorlopig) met de
+hand gestart en serialiseren via de `concurrency`-groep (§5 "Voorlopig
+bedrijf"). Elke run heeft een budget van 5,5 uur (`RUN_BUDGET_MIN=330`,
+job-timeout 355 min).
 
 ---
 
@@ -463,7 +492,9 @@ dashboard mag dus nooit een token bevatten.
 ## 15. Uitrol- en meetplan
 
 **Al gedaan (13-09-2026):** `schedule:` uit de drie jobbestanden gehaald en de
-watchdog verwijderd — zie §5.
+watchdog verwijderd — zie §5. De taken worden voorlopig handmatig gestart
+(§5, "Voorlopig bedrijf"); de stappen hieronder gelden voor het moment dat
+Cloudflare er is.
 
 1. Cloudflare-account + `wrangler login` (§16, punt 2).
 2. Worker bouwen en deployen met `DRY_RUN = "true"`, cron elke 5 min.
@@ -490,8 +521,9 @@ live is, moeten de taken handmatig gestart worden (Actions > *Run workflow*).
 
 ## 16. Openstaande beslissingen
 
-1. **Wanneer bouwen we de Worker?** Dit is nu het enige dat nog openstaat voor de
-   automatisering; tot dan draaien de taken alleen handmatig.
+1. **Wanneer bouwen we de Worker?** Bewust *nog niet*: de komende weken worden
+   de taken handmatig gestart (§5, "Voorlopig bedrijf"). Cloudflare is voor "op
+   termijn".
 2. **Cloudflare-account**: nieuw of bestaand, en beheer via `wrangler` of via
    het dashboard?
 3. **Statuspagina**: `fetch`-handler in de Worker (aanbevolen: één plek) of
@@ -512,7 +544,8 @@ live is, moeten de taken handmatig gestart worden (Actions > *Run workflow*).
   taken op :35.
 * Zware runs (4-5,5 uur) + 1-tegelijk-`concurrency` betekent: een late start
   loopt in de wachtrij van een voorganger. Spreiding van 8 uur met 4 uur werk
-  voorkomt dat.
+  voorkwam dat (die vaste spreiding is nu vervallen: de taken worden handmatig
+  gestart en wachten via de `concurrency`-groep op elkaar).
 * Er is geen queue-, next-run- of planner-log. "Er is niets gebeurd" is niet te
   onderscheiden van "het is nog niet geregistreerd".
 * Het ingebouwde `GITHUB_TOKEN` mág wél een `workflow_dispatch` doen (dat is de

@@ -307,11 +307,13 @@ eigen taak, in **één job** met een **dynamisch tijdsbudget** (niets hardcoded)
 > via de API. Ontwerp, Worker-code, uitrolplan en de afwegingen staan in
 > `docs/schedule-orchestratie.md`.
 >
-> Gevolg: tot die orchestrator live is, start er **niets** automatisch.
-> Handmatig blijft altijd werken: Actions → de workflow → *Run workflow*.
-> De runs zitten 8 uur uit elkaar en duren max ~4 uur (`RUN_BUDGET_MIN=240`),
-> dus ze overlappen elkaar nooit. De repo is public, dus Actions-minuten zijn
-> gratis.
+> Gevolg: er start **niets** automatisch. Handmatig: Actions → de workflow →
+> *Run workflow*. Voorlopig bedrijf (komende weken): 's ochtends de populaire en
+> de minst populaire taak kort na elkaar starten — de tweede blijft `pending`
+> staan tot de eerste klaar is en wordt **niet** geannuleerd — en 's avonds de
+> random-taak. Elke run mag max 5,5 uur (`RUN_BUDGET_MIN=330`; een plafond, geen
+> vaste duur), dus drie runs op één dag is maximaal ~16,5 uur werk. De repo is
+> public, dus Actions-minuten zijn gratis.
 
 Elke run doet hetzelfde voorwerk en daarna zijn eigen taak:
 
@@ -348,7 +350,7 @@ Het budget staat bovenin de workflow:
 
 ```yaml
 env:
-  RUN_BUDGET_MIN: "240"     # totale wall-clock budget van de hele run
+  RUN_BUDGET_MIN: "330"     # totale wall-clock budget van de hele run (5,5 uur)
   RUN_SHUTDOWN_MIN: "5"     # laatste minuten: alleen afronden (geen scriptwerk)
   MODE_MIN: "20"            # minimaal gereserveerd voor stap 3 (de eigen taak)
   RELEASES_MIN: "30"        # max. voor stap 2 (releasedatums); 0 = overslaan
@@ -358,12 +360,12 @@ env:
 Beide scripts stoppen **5 minuten vóór hun eigen budget** (netjes afgerond:
 laatste records weggeschreven, exit 0) en de commit + push komen daarna;
 `RUN_SHUTDOWN_MIN` reserveert die afrondtijd. Zo wordt er nooit midden in
-een regel afgebroken, ook al zit de run tegen de 240 minuten aan (GitHub
+een regel afgebroken, ook al zit de run tegen de 330 minuten aan (GitHub
 kapt een job hard af bij 360). Door de 5-minuten-checkpoints verlies je bij
 een onverwachte afbreking hooguit ~5 minuten werk.
 
-Rekenvoorbeelden: kost stap 1 maar 5 min → de eigen taak krijgt ~195 min;
-kost stap 1 60 min → ~140 min; gebruikt stap 1 zijn hele budget, dan
+Rekenvoorbeelden: kost stap 1 maar 5 min → de eigen taak krijgt ~285 min;
+kost stap 1 60 min → ~230 min; gebruikt stap 1 zijn hele budget, dan
 houdt de eigen taak nog altijd `MODE_MIN` (20 min) over — en de volgende
 run pakt de rest op.
 

@@ -12,10 +12,11 @@
 #   2  2_least_popular.yml   streeftijd 04:35 NL  -> --mode least-popular
 #   3  3_random.yml          streeftijd 12:35 NL  -> --mode random --weight-refreshes
 #
-# 8 uur uit elkaar: elke run heeft 8 uur voor max ~4 uur werk (RUN_BUDGET_MIN),
-# dus een late start loopt de volgende run niet in de weg. De concurrency-groep
-# hieronder is de vangrail: overlapt er toch iets (handmatige run, een run die
-# uitloopt), dan wacht de volgende.
+# De drie runs delen één concurrency-groep (`steam-data-fetch`, queue: max).
+# Start je er twee kort na elkaar, dan gaat de eerste draaien en blijft de
+# tweede `pending` staan tot de eerste klaar is - hij wordt NIET geannuleerd.
+# Let dus op de som: met RUN_BUDGET_MIN=330 (5,5 uur) kan een dag met 3 runs
+# maximaal ~16,5 uur werk zijn.
 #
 # Elke run doet drie dingen:
 #  STAP 1  fetch_games_initial.py (geen --limit): alle nog onbekende appids uit
@@ -40,10 +41,9 @@
 # met jsonl_to_table.py.
 #
 # Time budget: GitHub kapt een job na 360 min hard af, dus de run budgetteert
-# zichzelf met RUN_BUDGET_MIN (=240 min = 4 uur wall-clock). Dat past ruim in
-# het venster van 8 uur tussen de runs: een late start loopt de volgende run zo
-# niet in de weg en er hoeven nooit meerdere runs in de wachtrij te staan.
-# MODE_MIN (=20) is het minimum dat
+# zichzelf met RUN_BUDGET_MIN (=330 min = 5,5 uur wall-clock). Dat is een
+# PLAFOND, geen vaste duur: is het voorwerk klaar of is er weinig te doen, dan
+# stopt de run zelf eerder. MODE_MIN (=20) is het minimum dat
 # voor de eigen taak (stap 3) wordt gereserveerd - zo draait die ook op een dag
 # met veel nieuwe games -, RELEASES_MIN (=30) is het maximum voor stap 2 en
 # COMMIT_MIN (=5) de reserve voor de slotcommit. Beide scripts stoppen zelf
@@ -67,16 +67,16 @@ permissions:
   contents: write # nodig om de data terug te pushen
 
 env:
-  RUN_BUDGET_MIN: "240" # wall-clock budget van de hele run (4 uur; 8 uur tussen de runs)
+  RUN_BUDGET_MIN: "330" # wall-clock budget van de hele run (5,5 uur = plafond, geen vaste duur)
   RUN_SHUTDOWN_MIN: "5" # laatste minuten: alleen nog afronden
   MODE_MIN: "20"        # minimum dat voor de eigen taak (stap 3) overblijft
   RELEASES_MIN: "30"    # maximum voor stap 2 (releasedatums)
   COMMIT_MIN: "5"       # reserve voor de slotcommit
 
 concurrency:
-  # Eén schrijver tegelijk. De 3 runs staan 8 uur uit elkaar, dus normaal
-  # raken ze elkaar niet; dit is de vangrail voor als er tóch iets overlapt
-  # (handmatige run, een run die uitloopt). Ze werken namelijk op DEZELFDE
+  # Eén schrijver tegelijk. De runs worden handmatig na elkaar gestart, dus
+  # normaal raken ze elkaar niet; dit is de vangrail als er tóch iets overlapt
+  # (twee starts kort na elkaar, een run die uitloopt). Ze werken namelijk op
   # bestanden en pushen naar dezelfde branch, en `git push` is geen merge: een
   # push vanaf een verouderd commit wordt geweigerd en deze workflow doet geen
   # pull/rebase - parallel draaien zou dus werk weggooien.
@@ -91,10 +91,10 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    # Wall-clock plafond van de job: RUN_BUDGET_MIN (240) + de slotcommit en
-    # wat marge. GitHub kapt een job hard af na 360 min; wij stoppen ruim
-    # eerder, zodat elke run binnen zijn venster van 8 uur blijft.
-    timeout-minutes: 260
+    # Wall-clock plafond van de job: RUN_BUDGET_MIN (330) + de slotcommit en
+    # wat marge. GitHub kapt een job hard af na 360 min, dus hier is 355 de
+    # hoogst haalbare waarde.
+    timeout-minutes: 355
     env:
       # De `secrets`-context mag NIET in een `if:`-conditie, in `env` wel.
       # Zonder secret is de waarde leeg en slaat stap 1 zichzelf over.
@@ -123,7 +123,7 @@ jobs:
       - id: bulk
         name: Stap 1 - nieuwe games ophalen (fetch_games_initial)
         if: ${{ env.STEAM_API_KEY != '' }}
-        timeout-minutes: 215
+        timeout-minutes: 300
         continue-on-error: true
         shell: bash
         run: |
@@ -244,7 +244,7 @@ jobs:
       # volgende run het op.
       - id: main
         name: Stap 3 - eigen taak (populairste games, --mode popular)
-        timeout-minutes: 245
+        timeout-minutes: 345
         continue-on-error: true
         shell: bash
         run: |
