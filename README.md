@@ -179,14 +179,14 @@ python fetch_new_game_info.py --player-limit 50   # alleen games met gemiddeld
                                                   # < 50 spelers pollen
 python fetch_new_game_info.py --mode popular --max-duration-minutes 270
                                              # resterende tijd naar de MEEST
-                                             # populaire games (02:20 NL-run)
+                                             # populaire games (20:35 NL-run)
 python fetch_new_game_info.py --mode least-popular --max-duration-minutes 270
                                              # resterende tijd naar de MINST
                                              # populaire games: minst vaak
-                                             # ververst eerst (10:20 NL-run)
+                                             # ververst eerst (04:35 NL-run)
 python fetch_new_game_info.py --mode random --max-duration-minutes 270
                                              # resterende tijd naar willekeurige
-                                             # games (18:20 NL-run)
+                                             # games (12:35 NL-run)
 python fetch_new_game_info.py --limit 3500 --random --weight-refreshes
                                              # willekeurige games, maar de minst
                                              # vaak ververste eerst (binnen elke
@@ -249,11 +249,11 @@ geweest, wordt in fase 2 en 3 overgeslagen. `--limit` wordt in deze modus
 draait elke geplande run **één** selectie met het volledige tijdsbudget. Elk
 van de 3 runs per dag krijgt zo zijn eigen taak:
 
-- `--mode popular` (02:20 NL) — de **meest populaire** games: aflopend op het
+- `--mode popular` (20:35 NL) — de **meest populaire** games: aflopend op het
   laatste bekende spelersaantal per game (de nieuwste `games_extra_info`-regel,
   dus `appid_<hoogste nummer>` / nieuwste `DataUpdatedAt`; staat het daar niet
   in, dan valt het terug op `games.jsonl`). Dit is ook de standaardmodus.
-- `--mode least-popular` (10:20 NL) — de **minst populaire** games. Eerst wordt
+- `--mode least-popular` (04:35 NL) — de **minst populaire** games. Eerst wordt
   de "onderste" set bepaald: games met een **gemiddeld** spelersaantal onder
   `--least-max-avg` (default **100**), waarbij het gemiddelde wordt berekend uit
   de master-snapshot (`games.jsonl`) **+** alle `games_extra_info`-regels van die
@@ -264,8 +264,8 @@ van de 3 runs per dag krijgt zo zijn eigen taak:
   ververst. Games zonder enkele spelerswaarde vallen buiten de set ('onbekend'
   is niet hetzelfde als 'weinig spelers'). De grens is aanpasbaar met
   `--least-max-avg <N>`.
-- `--mode random` (18:20 NL) — **willekeurige** games die die dag nog niet aan
-  bod kwamen. De 18:20-run geeft hier `--weight-refreshes` mee: de volgorde
+- `--mode random` (12:35 NL) — **willekeurige** games die die dag nog niet aan
+  bod kwamen. De 12:35-run geeft hier `--weight-refreshes` mee: de volgorde
   wordt dan gewogen op het **aantal keren dat een game al is ververst** (het
   aantal `games_extra_info`-regels per appid) — minst vaak ververst eerst, en
   binnen elke groep willekeurig. Zo komen alle games op den duur ongeveer even
@@ -282,38 +282,42 @@ python fetch_new_game_info.py --mode random --weight-refreshes --max-duration-mi
 een game **overgeslagen die op dezelfde "run-dag" al is ververst**. Dat wordt
 bepaald uit de kolom `DataUpdatedAt`: de run-dag is
 `(DataUpdatedAt in UTC + 2 uur).date()`. Die `+2 uur` (`UTC+2`) zorgt dat de 3
-runs van één NL-dag (02:20/10:20/18:20) bij elkaar horen — de zomer- en
-wintertijden (00:20/08:20/16:20 vs. 01:20/09:20/17:20 UTC) vallen allebei in
-dezelfde run-dag. Zo ververst geen enkele game 2× op een dag en
+runs van één NL-dag (20:35 / 04:35 / 12:35) bij elkaar horen in beide seizoenen.
+Zo ververst geen enkele game 2× op een dag en
 gaat de tijd naar games die nog niet aan bod kwamen. Uitzetten kan met
 `--ignore-same-day` (bv. voor een handmatige extra run).
 
-### 3) GitHub Actions (optioneel)
+### 3) GitHub Actions
 
-`.github/workflows/nightly_fetch.yml` doet hetzelfde automatisch op GitHub,
-in **één job** met een **dynamisch tijdsbudget** (niets hardcoded):
+De dagtaken draaien op GitHub Actions: **drie losse workflows**, elk met één
+eigen taak, in **één job** met een **dynamisch tijdsbudget** (niets hardcoded):
 
-> **Schema (sinds 2026-09-13):** de workflow draait **automatisch 3× per
-> dag** — **02:20, 10:20 en 18:20 NL-tijd**. De timing staat **niet** meer op
-> GitHub's eigen planner: die is "best effort" en startte de runs gemeten 1,5
-> tot 5,5 uur te laat. In plaats daarvan roept **cron-job.org** (tijdzone
-> `Europe/Amsterdam`) op die drie tijdstippen de GitHub-API aan, met de taak
-> meteen meegegeven (`popular` / `least-popular` / `random`); de workflow
-> logt zelf welke timer hem startte. Het verschil zit in **wie het
-> startmoment bepaalt**: bij `schedule` doet GitHub dat zelf (best effort,
-> vanuit een wachtrij met alle repos, run kan vervallen, en de klok schuift in
-> de winter 1 uur), extern bepaal jij het en start de run meteen. Werkt alleen
-> als dit bestand op de **default branch (main)** staat. Handmatig starten blijft mogelijk:
-> Actions → *Nightly fetch new game info* → *Run workflow* (met de input
-> `mode` kies je dan zelf `popular`, `least-popular` of `random`). De repo is
-> public, dus Actions-minuten zijn gratis; de runs zitten 8 uur uit elkaar en
-> duren max ~5,5 uur, dus ze overlappen elkaar nooit.
+| workflow | taak | streeftijd (NL) |
+|---|---|---|
+| `1_most_popular.yml` | `--mode popular` | 20:35 |
+| `2_least_popular.yml` | `--mode least-popular` | 04:35 |
+| `3_random.yml` | `--mode random --weight-refreshes` | 12:35 |
+
+> **Timing (sinds 2026-09-13):** de workflowbestanden hebben **géén
+> `schedule:`** — alleen `workflow_dispatch`. GitHub's eigen planner is "best
+> effort": runs startten gemeten 1,5 tot 5,5 uur te laat, en de nieuwe crons
+> gingen helemaal niet af (0 geplande runs, alleen handmatige). De klok staat
+> daarom **buiten GitHub**: een schedule-orchestrator (Cloudflare Worker met een
+> cron) kijkt elke 5 minuten of een taak al gedraaid is en start hem anders zelf
+> via de API. Ontwerp, Worker-code, uitrolplan en de afwegingen staan in
+> `docs/schedule-orchestratie.md`.
+>
+> Gevolg: tot die orchestrator live is, start er **niets** automatisch.
+> Handmatig blijft altijd werken: Actions → de workflow → *Run workflow*.
+> De runs zitten 8 uur uit elkaar en duren max ~4 uur (`RUN_BUDGET_MIN=240`),
+> dus ze overlappen elkaar nooit. De repo is public, dus Actions-minuten zijn
+> gratis.
 
 Elke run doet hetzelfde voorwerk en daarna zijn eigen taak:
 
 1. **nieuwe games** — `fetch_games_initial.py` haalt alle nog onbekende
    appids op, met een budget van `RUN_BUDGET_MIN − RUN_SHUTDOWN_MIN −
-   (al gebruikt) − RELEASES_MIN − MAIN_MIN_MIN`; elke 5 minuten een
+   (al gebruikt) − RELEASES_MIN − MODE_MIN`; elke 5 minuten een
    checkpoint-commit. Uitgebrachte games → `games.jsonl`, nog niet
    uitgebrachte → `upcoming.jsonl` (zie hierboven).
 2. **releasedatums** — `fetch_games_initial_update_releases.py` controleert
@@ -324,10 +328,10 @@ Elke run doet hetzelfde voorwerk en daarna zijn eigen taak:
    checkpoints zouden niets opleveren.
 3. **eigen taak** — `fetch_new_game_info.py --mode <...>` met **alle
    resterende tijd** (min `COMMIT_MIN` voor de slotcommit): `popular`
-   (02:20 NL), `least-popular` (10:20 NL) of `random` (18:20 NL). De modus
-   komt van de timer die de run startte (de externe trigger geeft hem mee);
-   een handmatige run kiest hem met de input `mode`, en zonder timer valt de
-   workflow terug op het UTC-uur. Elke 5 minuten een checkpoint-commit.
+   (20:35 NL), `least-popular` (04:35 NL) of `random` (12:35 NL). De taak staat
+   vast per workflowbestand (`1_most_popular.yml` / `2_least_popular.yml` /
+   `3_random.yml`); er is geen `mode`-input en geen timerherkenning meer. Elke
+   5 minuten een checkpoint-commit.
 4. **slot** — de data wordt gecommit + gepusht: alleen de **bronbestanden**
    (`data/*.jsonl` en `*.json`). Deze stap draait ook als een eerdere stap is
    misgegaan (`if: always()`).
@@ -344,9 +348,9 @@ Het budget staat bovenin de workflow:
 
 ```yaml
 env:
-  RUN_BUDGET_MIN: "330"     # totale wall-clock budget van de hele run
+  RUN_BUDGET_MIN: "240"     # totale wall-clock budget van de hele run
   RUN_SHUTDOWN_MIN: "5"     # laatste minuten: alleen afronden (geen scriptwerk)
-  MAIN_MIN_MIN: "20"        # minimaal gereserveerd voor stap 3 (de modus-taak)
+  MODE_MIN: "20"            # minimaal gereserveerd voor stap 3 (de eigen taak)
   RELEASES_MIN: "30"        # max. voor stap 2 (releasedatums); 0 = overslaan
   COMMIT_MIN: "5"           # reserve voor de slotcommit (git add/commit/push)
 ```
@@ -354,13 +358,13 @@ env:
 Beide scripts stoppen **5 minuten vóór hun eigen budget** (netjes afgerond:
 laatste records weggeschreven, exit 0) en de commit + push komen daarna;
 `RUN_SHUTDOWN_MIN` reserveert die afrondtijd. Zo wordt er nooit midden in
-een regel afgebroken, ook al zit de run tegen de 330 minuten aan (GitHub
+een regel afgebroken, ook al zit de run tegen de 240 minuten aan (GitHub
 kapt een job hard af bij 360). Door de 5-minuten-checkpoints verlies je bij
 een onverwachte afbreking hooguit ~5 minuten werk.
 
-Rekenvoorbeelden: kost stap 1 maar 5 min → de eigen taak krijgt ~305 min;
-kost stap 1 60 min → ~250 min; gebruikt stap 1 bijna het hele budget, dan
-houdt de modus-taak nog altijd `MAIN_MIN_MIN` (20 min) over — en de volgende
+Rekenvoorbeelden: kost stap 1 maar 5 min → de eigen taak krijgt ~195 min;
+kost stap 1 60 min → ~140 min; gebruikt stap 1 zijn hele budget, dan
+houdt de eigen taak nog altijd `MODE_MIN` (20 min) over — en de volgende
 run pakt de rest op.
 
 `fetch_games_initial.py` print als laatste regel de status `RUN_STATUS=...`

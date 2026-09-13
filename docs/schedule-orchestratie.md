@@ -4,11 +4,9 @@
 > Doel: de dagtaken betrouwbaar op tijd starten **zonder** GitHub's planner
 > (die "best effort" is) en **zonder** een laptop die 24/7 aan moet staan.
 
-Dit document heette eerder `cloudflare-trigger.md`. Het is breder getrokken: het
-gaat over **waar de klok woont en waar de orchestration-logica woont**, niet over
-één leverancier. Cloudflare is op dit moment de meest logische kandidaat, maar
-GitHub Pages, Google Apps Script en een GitHub-workflow die zelf dispatchet staan
-er net zo goed in.
+Dit document heette eerder `cloudflare-trigger.md`. Het gaat over **waar de klok
+woont en waar de orchestration-logica woont**. Cloudflare Workers is de gekozen
+kandidaat; de andere opties staan verderop kort naast elkaar (§6).
 
 Het staat op zichzelf: aanleiding (met metingen), ontwerp, kant-en-klare
 Worker-code als referentie-implementatie, uitrolplan en openstaande keuzes.
@@ -30,24 +28,24 @@ Daar hoort één scherp onderscheid bij, want dat bepaalt de rest van het ontwer
 | | wel | niet |
 |---|---|---|
 | **logica** | **exact één plek** die weet welke taak wanneer moet lopen en of dat al gebeurd is | meerdere plekken die elk hun eigen idee hebben over "wat moet er nu gebeuren" |
-| **tikken** (cron/klok) | mogen er **meerdere** zijn | — |
+| **tikken** (cron/klok) | één externe klok, die alle taken langs dezelfde idempotente regel stuurt | losse GitHub-crons op de taken zelf |
 
-Dat lijkt in tegenspraak met "één klok", maar is het niet: zolang **elke** tik
-door dezelfde idempotente regel gaat ("is het werk voor dit slot al gedaan?"),
-kan een tweede tikbron geen tweede run veroorzaken. Het gevaar is niet *twee
-keer tikken*, het gevaar is *twee plekken met eigen logica* — dat is precies wat
-we nu hebben: drie jobbestanden met elk een eigen `schedule:` en daarnaast een
-watchdog met een eigen regel.
+**Uitgangspunt (13-09-2026): GitHub-crons zo veel mogelijk voorkomen.** Elke
+GitHub-`schedule` is een tweede plek met logica en hangt aan een planner die niet
+te bewaken is (§2). Daarom is besloten:
 
-**Ontwerpprincipe:**
+1. De drie jobbestanden zijn **dom**: ze doen hun werk en hebben **alleen nog
+   `workflow_dispatch`** — geen `schedule:`. *Uitgevoerd op 13-09-2026.*
+2. Er komt **één orchestrator** met de logica + de "is het werk gedaan?"-controle:
+   de Cloudflare Worker. Die heeft de enige cron in het hele systeem.
+3. De **watchdog is vervallen** (`0_watchdog.yml` + `watchdog_check.py` zijn
+   verwijderd). Zijn regel ("is er al een run sinds het slot?") zit nu in de
+   orchestrator, want precies die regel is wat elke tik hoort te doen.
 
-1. De drie jobbestanden worden **dom**: ze doen hun werk en hebben **alleen nog
-   `workflow_dispatch`** — geen `schedule:`.
-2. Er komt **één orchestrator** met de logica + de "is het werk gedaan?"-controle.
-3. De orchestrator mag door **meerdere tikbronnen** wakker gemaakt worden
-   (bijv. Cloudflare-cron én GitHub's `schedule` op de orchestrator). Elke tik
-   loopt door dezelfde regel, dus redundantie is gratis en levert geen dubbele
-   runs.
+Technisch is een tweede tikbron ongevaarlijk — zolang elke tik door dezelfde
+regel gaat kan hij geen tweede run veroorzaken. Maar hij is niet nodig, en een
+GitHub-cron erbij zetten is een extra afhankelijkheid van de planner die we juist
+willen vermijden. Dus: **één klok**.
 
 ---
 
@@ -104,15 +102,17 @@ afhankelijk van iets lokaals.
 
 ## 3. Wat er nu ligt (en wat het waard is)
 
-| onderdeel | wat het doet | tekortkoming |
-|---|---|---|
-| `1_most_popular.yml` / `2_least_popular.yml` / `3_random.yml` | eigen `schedule:` (20:35 / 04:35 / 12:35 NL, met `timezone: Europe/Amsterdam`) + `workflow_dispatch` | drie losse klokken met de onbetrouwbare planner; de klok zit ín het zware werk (4 uur per run) |
-| `0_watchdog.yml` + `watchdog_check.py` | elke 30 min controleren of een dagtaak gedraaid is, anders zelf starten | **hangt zelf ook aan dezelfde planner**; het is een pleister, geen klok |
+| onderdeel | status |
+|---|---|
+| `1_most_popular.yml` / `2_least_popular.yml` / `3_random.yml` | **klaar**: alleen `workflow_dispatch`, geen `schedule:` meer. Ze wachten op de orchestrator. |
+| `0_watchdog.yml` + `watchdog_check.py` | **verwijderd** (13-09-2026); hun regel is overgenomen door de orchestrator (§9) |
+| de orchestrator | **bestaat nog niet** — dit is het enige dat nog gebouwd moet worden (§10) |
 
-Stand van zaken op 13-09-2026 (21:00 NL): de watchdog heeft 1 run gehad (de
-handmatige van Yookiop, 18:48 UTC, geslaagd in 8 s) en **0 geplande runs**; de
-drie dagtaken hadden 0 geplande runs (`1_most_popular` had één handmatige run,
-gestart 20:52 NL). De nieuwe crons hebben dus nog niet aangetoond dat ze werken.
+Wat de crons in de praktijk deden (13-09-2026): de drie dagtaken en de watchdog
+hadden om 21:17 NL nog steeds **0 geplande runs** (alleen de handmatige runs van
+Yookiop werkten). Een nieuwe cron die niet afgaat is van buitenaf niet te
+onderscheiden van een gedropte run (§2). Dat is de directe aanleiding om GitHub's
+planner helemaal uit het systeem te halen.
 
 ---
 
@@ -124,35 +124,41 @@ gestart 20:52 NL). De nieuwe crons hebben dus nog niet aangetoond dat ze werken.
 | HTTP POST kunnen doen met een geheim | een `workflow_dispatch` vereist een token |
 | geheimen kunnen bewaren (niet in de repo, niet in de browser) | een PAT in een statische pagina is voor iedereen leesbaar |
 | status/geschiedenis tonen | dit is precies wat GitHub mist: "heeft de klok getikt?" |
-| idempotent kunnen werken | meerdere tikbronnen mogen geen dubbele runs geven |
+| idempotent kunnen werken | een herhaalde tik (of een handmatige run) mag nooit tot een tweede run leiden |
 | gratis (of bijna) + geen onderhoud | het is een hulpmiddel, geen project |
 
 ---
 
-## 5. Kan GitHub Pages dit? (nee voor de klok, ja als dashboard)
+## 5. Uitgangspunt: GitHub-crons zo veel mogelijk vermijden
 
-Pages is **statische hosting**: HTML/CSS/JS uit de repo, meer niet. Er is geen
-server die code uitvoert, dus **geen cron, geen achtergrondtaak, geen POST naar
-de GitHub-API**. Een pagina doet alleen iets op het moment dat iemand hem opent.
+Redenen om **geen enkele** GitHub-cron meer te gebruiken:
 
-| vraag | antwoord |
-|---|---|
-| kan een Pages-site op vaste tijden de 3 jobs starten? | **nee** — er is geen executor en geen cron |
-| kan een Pages-site op een knop de jobs starten? | technisch ja, maar dan moet er een **PAT in de JavaScript** staan → iedereen kan hem lezen en misbruiken. Pages kan geen secrets bewaren. |
-| kan een Pages-site tonen wat de status is? | **ja** — de run-overzichten van een publieke repo zijn zonder token te lezen (runs, `status`, `conclusion`, laatste commit). Dat is een nuttig dashboard, geen orchestrator. |
-| kan een Pages-site de externe klok vervangen? | nee. Een pagina die door een workflow met `schedule` gebouwd wordt, heeft GitHub's planner als klok → precies wat we niet willen. |
+1. **De planner is "best effort" en niet te bewaken**: vertraging tot uren, runs
+   die vervallen zonder enig spoor, geen planner-log, geen queue-overzicht (§2).
+   Je kunt niet zien of een gemiste tik "gedropt" of "nog niet geregistreerd"
+   is — precies de onzekerheid die dit document oplost.
+2. **Elke cron is een tweede plek met logica.** Een `schedule:` in een jobbestand
+   zegt "dit moet om 20:35 gebeuren"; een cron in de orchestrator zegt hetzelfde.
+   Twee plekken die hetzelfde beweren, is de situatie die we weghalen.
+3. **De planner concurreert met het werk.** Een late tik viel eerder bovenop een
+   run van 4 uur (`concurrency`), met gemeten wachttijden van 191 en 98 minuten.
+   Een klok buiten GitHub heeft dat probleem niet.
 
-Limieten van Pages (docs, gratis, publieke repo): site max **1 GB**, soft
-**100 GB/maand** bandbreedte, soft **10 builds/uur** (geldt niet als je met een
-eigen Actions-workflow bouwt), deploy-timeout **10 min**, **één site per repo**.
-Een statuspagina zit daar mijlenver onder. Let op de TOS: Pages is niet bedoeld
-voor commerciële transacties of gevoelige data — een statische statuspagina is
-prima.
+**Wat er op 13-09-2026 is doorgevoerd:**
 
-**Conclusie:** Pages is een **voorkant**, geen orchestrator. Wil je het dashboard
-op dezelfde plek als de klok, dan kan dat beter met **Workers Static Assets**
-(dezelfde Worker serveert dan ook de pagina) of met een
-`fetch`-handler in de Worker (§10) — dan is het letterlijk één plek.
+* `schedule:` (en `timezone:`) is uit `1_most_popular.yml`,
+  `2_least_popular.yml` en `3_random.yml` gehaald. Ze hebben alleen nog
+  `workflow_dispatch`, met een kopcommentaar dat uitlegt waarom.
+* `0_watchdog.yml` en `watchdog_check.py` zijn verwijderd; de regel zit nu in de
+  orchestrator.
+* Er staat daarmee **geen enkele GitHub-cron meer in deze repo**.
+
+**Gevolg, expliciet:** zolang de orchestrator niet live is, start er **niets**
+automatisch. Handmatig werkt alles nog: Actions > de workflow > *Run workflow*
+(`workflow_dispatch`). Dat is de prijs van één klok, en het is tijdelijk.
+
+**Wat GitHub blijft doen:** rekenkracht (de runs van ~4 uur) en de plek waar de
+code en de data staan. Alleen het *timen* halen we er weg.
 
 ---
 
@@ -161,9 +167,8 @@ op dezelfde plek als de klok, dan kan dat beter met **Workers Static Assets**
 | optie | klok? | secrets? | historie/zichtbaarheid | kosten | oordeel |
 |---|---|---|---|---|---|
 | **Cloudflare Worker + Cron Trigger** | ja (minuutgranulariteit) | ja (`wrangler secret`) | **Cron Events: laatste 100 invocaties + Workers Logs** | gratis (100k req/dag, 5 crons, 10 ms CPU/tik) | **aanbevolen**: dit is de enige optie die de klok én de logica op één plek zet met echte tikhistorie |
-| Cloudflare Worker + Static Assets (dashboard erbij) | ja | ja | idem + eigen statuspagina | gratis | **aanbevolen als je de "ene plek" ook visueel wilt** (dan is GitHub Pages niet nodig) |
-| **GitHub Actions als enige orchestrator** (1 bestand met 3 crons dat de 3 jobbestanden dispatcht) | ja, maar met dezelfde onbetrouwbare planner | ja, en zelfs het ingebouwde `GITHUB_TOKEN` volstaat (geen PAT!) | gewone run-historie | gratis | **sterke tussenstap**: centraliseert de logica met 0 nieuwe accounts en 0 secrets; als extra tikbron naast een externe klok juist heel nuttig |
-| GitHub Pages | **nee** (statisch, geen executor) | **nee** | kan publieke run-data tonen | gratis | alleen als statuspagina; niet als klok |
+| Cloudflare Worker + Static Assets (dashboard erbij) | ja | ja | idem + eigen statuspagina | gratis | **aanbevolen als je de "ene plek" ook visueel wilt** |
+| **GitHub Actions als orchestrator** (1 bestand met 3 crons dat de 3 jobbestanden dispatcht) | ja, maar met **dezelfde onbetrouwbare planner** | ja, en zelfs het ingebouwde `GITHUB_TOKEN` volstaat (geen PAT!) | gewone run-historie | gratis | centraliseert de logica met 0 accounts, maar houdt de klok bij GitHub → **niet in lijn met §5**, alleen als noodoplossing |
 | Google Apps Script (time-driven trigger) | ja (per minuut) | ja (Script Properties) | uitvoeringslog in het dashboard | gratis (ruime dagquota) | goede tweede keuze; kan zelfs een web-app als dashboard serveren |
 | cron-job.org (eerder geprobeerd) | ja | nee, tenzij de PAT in de URL/headers staat → kwetsbaar | beperkte historie | gratis | alleen bruikbaar als tikbron naar een proxy die het token bewaart |
 | Vercel / Netlify scheduled functions | ja | ja | logs | gratis tier | kan, maar nieuw account; gratis plannen zijn beperkt in frequentie en aantal — check de actuele limieten |
@@ -177,24 +182,23 @@ op dezelfde plek als de klok, dan kan dat beter met **Workers Static Assets**
 
 ```mermaid
 flowchart LR
-  CF["Cloudflare Worker (cron elke 5 min)\n= klok + logica"] -->|"1. runs opvragen"| GHAPI["GitHub API"]
+  CF["Cloudflare Worker (cron elke 5 min)\n= de enige klok + de logica"] -->|"1. runs opvragen"| GHAPI["GitHub API"]
   CF -->|"2. workflow_dispatch\nals er iets mist"| GHAPI
-  CF -->|"3. (optioneel) zelfde regel\nop GitHub-cron"| GHAPI
-  GHAPI -->|"4. start run"| WF["GitHub Actions\n1_most_popular / 2_least_popular / 3_random\n(alleen workflow_dispatch, geen schedule)"]
-  WF -->|"5. commit data"| REPO["data/ op main"]
-  WD["0_watchdog (laag 2, grace 60 min)"] -->|"grijpt in als de klok zelf stilvalt"| GHAPI
-  PAGES["Statuspagina\n(Worker fetch of GitHub Pages)"] -.->|"leest alleen"| GHAPI
+  GHAPI -->|"3. start run"| WF["GitHub Actions\n1_most_popular / 2_least_popular / 3_random\n(alleen workflow_dispatch, geen schedule)"]
+  WF -->|"4. commit data"| REPO["data/ op main"]
+  CF -.->|"5. optioneel: statuspagina\n(fetch-handler, read-only)"| BROWSER["jij, in de browser"]
 ```
 
 | laag | wie | wanneer | rol | eerlijkheid |
 |---|---|---|---|---|
-| 1 | Cloudflare Worker | elke 5 min | **de klok én de logica**: start de taak binnen ~5 min na het geplande moment | bewezen moet worden met de meetweek (§15) |
-| 1b (optioneel) | GitHub-`schedule` **op de orchestrator** | 20:30 / 04:30 / 12:30 NL | extra tikbron voor dezelfde regel | zelfde onbetrouwbare planner, maar schade is nu beperkt: één gemiste tik is geen gemiste run |
-| 2 | `0_watchdog` (GitHub) | elke 30 min, grace 60 min | vangnet als laag 1 helemaal stilvalt | hangt zelf aan de planner → geen garantie, alleen een extra kans |
-| 3 | `schedule:` in de drie jobbestanden | 20:35 / 04:35 / 12:35 NL | **vervalt** (dit is juist de dubbele logica die weg moet) | — |
+| 1 | Cloudflare Worker | elke 5 min | **de klok én de logica**: start de taak binnen ~5 min na het geplande moment | moet bewezen worden met de meetweek (§15) |
+| 2 | `0_watchdog` (GitHub) | — | **verwijderd**; zijn regel zit nu in laag 1 | — |
+| 3 | `schedule:` in de drie jobbestanden | — | **verwijderd** (13-09-2026) | — |
 
-Let op: laag 3 is de laag die we per dit ontwerp **weghalen**. Zolang die er nog
-staat, zijn er twee plekken met logica en kan er dubbel werk ontstaan.
+Laag 1 is daarmee het enige bewegende deel: één klok, één plek. De prijs staat in
+§5 — valt hij stil, dan start er niets — dus zichtbaarheid (Cron Events, een
+`fetch`-statuspagina, §11) is geen luxe maar het vangnet dat de watchdog eerst
+was.
 
 ---
 
@@ -233,9 +237,9 @@ volgende taak niet in de weg lopen.
    datumrekenwerk met tijdzones nodig.
 6. **Idempotent**: na een geslaagde dispatch bestaat de run, dus de volgende tik
    (en elke andere tikbron) ziet hem en doet niets. Geen dubbele starts.
-7. Dit is **dezelfde regel** als in `watchdog_check.py` — de bestaande Python is
-   de specificatie; de orchestrator is de verhuizing van die regel naar de plek
-   waar ook de klok staat.
+7. Dit is **dezelfde regel** als de (verwijderde) `watchdog_check.py` hanteerde:
+   die Python is de specificatie van de regel, de orchestrator is de verhuizing
+   naar de plek waar ook de klok staat.
 
 ---
 
@@ -261,7 +265,7 @@ const TASKS = [
   { file: "3_random.yml", at: "12:35" },
 ];
 
-const GRACE_MIN = 5;   // zo lang mag een andere tikbron het nog zelf doen
+const GRACE_MIN = 5;   // zo lang mag een handmatige run nog als "klaar" gelden
 const MAX_LATE_H = 8;  // een ouder slot halen we niet meer in
 
 function nlNow(date) {
@@ -331,7 +335,7 @@ export default {
   },
 
   // Optioneel: dezelfde Worker serveert een read-only statuspagina.
-  // Zonder secrets in de pagina (de PAT blijft server-side) en zonder GitHub Pages.
+  // Zonder secrets in de pagina (de PAT blijft server-side).
   async fetch(request, env) {
     if (new URL(request.url).pathname !== "/") {
       return new Response("not found", { status: 404 });
@@ -406,9 +410,9 @@ werken.
   (write omvat read; dat is genoeg voor zowel runs lezen als dispatchen).
 * Alleen als **secret van de orchestrator** (Cloudflare-secret / Apps Script
   property / GitHub Actions secret), nooit in de repo, nooit in een log.
-* **Nooit in een statische pagina** (GitHub Pages): alles in de browser is
-  publiek, en Pages kan geen secrets bewaren. Een dashboard mag dus alleen
-  *lezen* wat toch al publiek is.
+* **Nooit in een statische pagina of in browser-JavaScript**: alles wat in de
+  browser belandt is publiek. Een dashboard mag dus alleen *lezen* wat toch al
+  publiek is.
 * Zet een vervaldatum en noteer hier wanneer je moet roteren:
   vervaldatum: `…` — geroteerd op: `…`.
 
@@ -427,9 +431,8 @@ Relevante limieten van het **gratis** Workers-plan:
 | wall time per cron-invocatie | 15 min | seconden |
 
 Wordt 10 ms CPU toch een probleem (bijv. door grotere responses), dan is het
-betaalde plan ($5/mnd) de uitweg: 30 s CPU. Eerst meten. GitHub Pages kost niets
-extra (limieten staan in §5) en een GitHub-Actions-orchestrator ook niet, want
-deze repo is publiek.
+betaalde plan ($5/mnd) de uitweg: 30 s CPU. Eerst meten. GitHub is hier gratis:
+deze repo is publiek, dus de runs kosten geen minuten.
 
 ---
 
@@ -438,11 +441,13 @@ deze repo is publiek.
 * Ook Cloudflare's scheduler is geen contractuele garantie — maar wel meetbaar
   punctueler én, belangrijker, **zichtbaar** (Cron Events). Bewijs moet uit de
   meetweek komen, niet uit beloftes.
-* **Eén plek = één faalpunt.** Daarom blijft laag 2 (`0_watchdog`) bestaan, of
-  komt er een tweede tikbron op dezelfde idempotente regel. Dat is geen tweede
-  logica: het is dezelfde regel, andere wekker.
-* Als de orchestrator een dispatch accepteert maar de run start niet, grijpt
-  laag 2 in.
+* **Eén plek = één faalpunt, en dat is nu een bewuste keuze.** Er is geen
+  watchdog meer (dat zou weer een GitHub-cron zijn). De mitigatie zit in
+  zichtbaarheid: Cron Events + Workers Logs (§11) laten zien dát de klok tikt,
+  en elke taak blijft handmatig startbaar. Dat is een verbetering ten opzichte
+  van de planner, waar een gemiste tik alleen als afwezigheid merkbaar was.
+* Als de orchestrator een dispatch accepteert maar de run niet start, blijft dat
+  staan tot de volgende tik of een handmatige run.
 * Dubbele runs zijn niet fataal (de `concurrency`-groep serialiseert ze en de
   max-1×-per-dag-regel voorkomt dubbel werk per game), maar kosten wel tijd.
 * De orchestrator moet weten hoe de taken heten (`TASKS`-lijst): bij een nieuwe
@@ -450,57 +455,52 @@ deze repo is publiek.
   drie.
 * PAT-rotatie is handwerk; zonder geldige token doet de orchestrator niets (en
   dat zie je in de logs — hij faalt zichtbaar, niet stil).
-* GitHub Pages kan geen secrets bewaren; een pagina mag dus nooit een token
-  bevatten.
+* Een statische pagina of browser-JavaScript kan geen secrets bewaren; een
+dashboard mag dus nooit een token bevatten.
 
 ---
 
 ## 15. Uitrol- en meetplan
 
-1. Kies de tikbron(nen) (§16, punt 1) en de orchestrator (§16, punt 2).
-2. Orchestrator bouwen en deployen met `DRY_RUN = "true"`, cron elke 5 min.
-   GitHub blijft intussen gewoon zoals het is — er verandert nog niets.
+**Al gedaan (13-09-2026):** `schedule:` uit de drie jobbestanden gehaald en de
+watchdog verwijderd — zie §5.
+
+1. Cloudflare-account + `wrangler login` (§16, punt 2).
+2. Worker bouwen en deployen met `DRY_RUN = "true"`, cron elke 5 min.
 3. **Een dag droog draaien**: in de logs moet precies 3× "MIST" verschijnen, op
    ~20:40, ~04:40 en ~12:40 NL. Alles daarbuiten = logica-fout.
-4. `DRY_RUN = "false"`. De orchestrator start nu zelf.
-5. **De `schedule:`-blokken uit de drie jobbestanden halen** (dit is de kern van
-   de opzet: één plek voor de logica, geen tweede klok meer op de jobs).
-   Vanaf dit moment is de orchestrator de enige plek die beslist.
-6. **Een week meten**: per dag de `created_at` van de drie runs vergelijken met
+4. `DRY_RUN = "false"`. Vanaf nu start de orchestrator alles; er is geen tweede
+   klok meer die hetzelfde kan doen.
+5. **Een week meten**: per dag de `created_at` van de drie runs vergelijken met
    20:35 / 04:35 / 12:35 NL. Doel: binnen 5 minuten. Vastleggen:
 
    | datum | 1_most_popular | 2_least_popular | 3_random |
    |---|---|---|---|
    | … | … | … | … |
 
-7. Daarna beslissen of laag 2 (`0_watchdog`) blijft of uitgaat.
-8. Rollback is klein: `schedule:`-blokken terugzetten (één commit) en de
-   orchestrator verwijderen. Aan de data of de jobinhoud verandert niets.
+6. Bij twijfel over de punctualiteit: de tikfrequentie verhogen (1 min i.p.v.
+   5 min) — dat kost alleen subrequests, geen geld.
+7. Rollback: de Worker verwijderen (of `DRY_RUN = "true"` zetten). Dat zet de
+   automatisering uit, niet de taken: handmatig starten blijft werken.
 
-Volgorde-risico: tussen stap 4 en 5 bestaan er tijdelijk twee plekken met
-logica. Dat levert geen dubbele run op zolang de jobbestanden hun eigen
-`schedule:` nog hebben én de orchestrator ziet dat de run er al is (dat is
-precies de idempotente regel) — maar houd die periode kort.
+Let op: sinds 13-09-2026 staat er geen enkele GitHub-cron meer. Tot de Worker
+live is, moeten de taken handmatig gestart worden (Actions > *Run workflow*).
 
 ---
 
 ## 16. Openstaande beslissingen
 
-1. **Tikbron(nen)**: alleen de externe klok (strikt "één klok"), of de externe
-   klok **plus** GitHub's `schedule` op de orchestrator als gratis extra
-   wekker? Dat laatste is verdedigbaar zodra de logica op één plek staat, want
-   een gemiste tik is dan geen gemiste run.
+1. **Wanneer bouwen we de Worker?** Dit is nu het enige dat nog openstaat voor de
+   automatisering; tot dan draaien de taken alleen handmatig.
 2. **Cloudflare-account**: nieuw of bestaand, en beheer via `wrangler` of via
    het dashboard?
-3. **Dashboard**: Workers Static Assets / `fetch`-handler in de Worker
-   (aanbevolen: één plek), of toch GitHub Pages (los, read-only), of niets?
-4. **Laag 2 wel of niet houden**: advies is houden (grace 60 min), tenzij de
-   meetweek aantoont dat de externe klok alles zelf afvangt.
-5. **Melding bij ingrijpen**: een GitHub-issue openen als de orchestrator een
+3. **Statuspagina**: `fetch`-handler in de Worker (aanbevolen: één plek) of
+   niets?
+4. **Melding bij ingrijpen**: een GitHub-issue openen als de orchestrator een
    gemiste taak start (e-mail-alert), of alleen loggen?
-6. **CPU-limiet**: gratis plan (10 ms) aanhouden of meteen betaald?
-7. **De 3 jobbestanden**: alleen `schedule:` eruit, of ook de nu nog
-   aanwezige `workflow_dispatch`-uitleg opruimen zodat ze echt "dom" zijn?
+5. **CPU-limiet**: gratis plan (10 ms) aanhouden of meteen betaald?
+6. **Tikfrequentie**: 5 min (288 tikken/dag) of 1 min als we strakker willen
+   starten?
 
 ---
 
@@ -522,3 +522,7 @@ precies de idempotente regel) — maar houd die periode kort.
   controleren: de `check-runs`-API laat voor Actions-jobs `output.title`,
   `.summary` én `.text` leeg, en de publieke run-pagina toont een placeholder.
   Alleen ingelogd (of via het step-log) is die te zien.
+* Nieuwe cronbestanden gingen ook niet af: op 13-09-2026 stonden er om 21:17 NL
+  nog steeds 0 geplande runs op de drie dagtaken én op de watchdog — alleen
+  handmatige runs. Conclusie: haal de klok uit de planner in plaats van erop te
+  wachten. Sinds die dag staat er geen enkele GitHub-cron meer in deze repo.

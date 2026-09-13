@@ -1,21 +1,21 @@
-# 2_least_popular: 04:35 NL -> de MINST POPULAIRE games (--mode least-popular)
+# 2_least_popular: de MINST POPULAIRE games (--mode least-popular) - streeftijd 04:35 NL
 #
-# Dit is 1 van de 3 runs per dag. Elk bestand heeft zijn eigen cron en zijn
-# eigen taak; het voorwerk (nieuwe games + releasedatums) is in alle drie
-# hetzelfde:
+# GEEN `schedule:` IN DIT BESTAND, en dat is bewust. De timing komt uit de
+# schedule-orchestratie (zie docs/schedule-orchestratie.md): die klok start dit
+# bestand met een `workflow_dispatch`. Handmatig kan ook: Actions > Run workflow.
+# Er staat dus nergens meer een GitHub-cron op deze taak.
 #
-#   1  1_most_popular.yml    35 20 * * *   (20:35 NL)  -> --mode popular
-#   2  2_least_popular.yml   35 4 * * *    (04:35 NL)  -> --mode least-popular
-#   3  3_random.yml          35 12 * * *   (12:35 NL)  -> --mode random --weight-refreshes
+# Dit is 1 van de 3 runs per dag. Het voorwerk (nieuwe games + releasedatums) is
+# in alle drie hetzelfde:
+#
+#   1  1_most_popular.yml    streeftijd 20:35 NL  -> --mode popular
+#   2  2_least_popular.yml   streeftijd 04:35 NL  -> --mode least-popular
+#   3  3_random.yml          streeftijd 12:35 NL  -> --mode random --weight-refreshes
 #
 # 8 uur uit elkaar: elke run heeft 8 uur voor max ~4 uur werk (RUN_BUDGET_MIN),
-# dus een late start (GitHub's planner is "best effort") loopt de volgende run
-# niet in de weg. De concurrency-groep hieronder is de vangrail: overlapt er
-# toch iets (handmatige run, een run die uitloopt), dan wacht de volgende.
-#
-# TIJD: de crons staan in NL-tijd dank zij `timezone: Europe/Amsterdam` (geen
-# UTC-rekenwerk en geen zomertijd-verschuiving meer). De taak staat per bestand
-# vast en niet in de cron.
+# dus een late start loopt de volgende run niet in de weg. De concurrency-groep
+# hieronder is de vangrail: overlapt er toch iets (handmatige run, een run die
+# uitloopt), dan wacht de volgende.
 #
 # Elke run doet drie dingen:
 #  STAP 1  fetch_games_initial.py (geen --limit): alle nog onbekende appids uit
@@ -43,9 +43,9 @@
 #
 # Time budget: GitHub kapt een job na 360 min hard af, dus de run budgetteert
 # zichzelf met RUN_BUDGET_MIN (=240 min = 4 uur wall-clock). Dat past ruim in
-# het venster van 8 uur tussen de runs: een late start (GitHub's planner is
-# "best effort") loopt de volgende run zo niet in de weg en er hoeven nooit
-# meerdere runs in de wachtrij te staan. MODE_MIN (=20) is het minimum dat
+# het venster van 8 uur tussen de runs: een late start loopt de volgende run zo
+# niet in de weg en er hoeven nooit meerdere runs in de wachtrij te staan.
+# MODE_MIN (=20) is het minimum dat
 # voor de eigen taak (stap 3) wordt gereserveerd - zo draait die ook op een dag
 # met veel nieuwe games -, RELEASES_MIN (=30) is het maximum voor stap 2 en
 # COMMIT_MIN (=5) de reserve voor de slotcommit. Beide scripts stoppen zelf
@@ -61,11 +61,9 @@
 name: 2_least_popular
 
 on:
-  # 04:35 NL, jaarrond (de timezone-regel hieronder).
-  schedule:
-    - cron: "35 4 * * *"
-      timezone: "Europe/Amsterdam"
-  workflow_dispatch: # handmatig: doet exact dezelfde run
+  # Geen `schedule:` (zie de kop van dit bestand): de orchestrator start deze
+  # taak, of jij doet het handmatig.
+  workflow_dispatch: # handmatig / via de orchestrator: doet exact dezelfde run
 
 permissions:
   contents: write # nodig om de data terug te pushen
@@ -335,7 +333,8 @@ jobs:
         shell: bash
         run: |
           set -u
-          echo "> run            : 2_least_popular (cron 35 4 * * *, timezone Europe/Amsterdam)"
+          echo "> run            : 2_least_popular (streeftijd 04:35 NL, geen eigen cron)"
+          echo "> gestart door   : ${{ github.event_name }} van ${{ github.actor }}"
           echo "> nieuwe games   : ${{ steps.bulk.outcome }} (${{ steps.bulk.conclusion }})"
           echo "> releasedata    : ${{ steps.releases.outcome }} (${{ steps.releases.conclusion }})"
           echo "> eigen taak     : ${{ steps.main.outcome }} (${{ steps.main.conclusion }})"
