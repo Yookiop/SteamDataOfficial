@@ -25,7 +25,7 @@ als het zusterscript) en:
 
 MAX. 1x PER DAG (net als de extra-info-taak): elk upcoming-record heeft
 `release_checked_at` (UTC). Een game die op dezelfde "run-dag" (UTC+2, dus de
-3 runs 01:00/09:00/17:00 NL) al is bekeken wordt overgeslagen - anders zouden
+3 runs 02:30/10:30/18:30 NL) al is bekeken wordt overgeslagen - anders zouden
 de 3 runs van een dag drie keer dezelfde games pakken. Uitzetten:
 `--ignore-same-day`. Een échte netwerk-/throttle-fout wordt juist NIET
 vastgelegd (die proberen we opnieuw).
