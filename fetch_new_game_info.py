@@ -99,7 +99,7 @@ selectie). Voorbeeld:
     python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
 
 Met --mode <popular|least-popular|random> (bedoeld voor de 3 geplande
-runs: 02:30 / 10:30 / 18:30 NL-tijd) krijgt het volledige
+runs: 02:20 / 10:20 / 18:20 NL-tijd) krijgt het volledige
 tijdsbudget EEN selectie:
 
   popular        de MEEST populaire games: aflopend op het laatste bekende
@@ -132,8 +132,8 @@ tijdsbudget EEN selectie:
 MAX. 1x PER DAG: in ALLE modi (ook --top_bottom_random) wordt een game
 overgeslagen die op dezelfde "run-dag" al is ververst. De run-dag is
 (DataUpdatedAt + 2 uur).date() - UTC+2, zodat de 3 runs van een NL-dag
-(02:30/10:30/18:30) bij elkaar horen; die +2 uur klopt in beide seizoenen
-(zomer 00:30/08:30/16:30 UTC, winter 01:30/09:30/17:30 UTC). Zo ververst geen
+(02:20/10:20/18:20) bij elkaar horen; die +2 uur klopt in beide seizoenen
+(zomer 00:20/08:20/16:20 UTC, winter 01:20/09:20/17:20 UTC). Zo ververst geen
 enkele game 2x op een dag en gaat de tijd naar
 games die nog niet aan bod kwamen. Uitzetten: --ignore-same-day.
 
@@ -175,15 +175,15 @@ Gebruik:
                                                   # (~90 min per fase)
     python fetch_new_game_info.py --mode popular --max-duration-minutes 270
                                                   # resterende tijd naar de MEEST
-                                                  # populaire games (02:30 NL-run)
+                                                  # populaire games (02:20 NL-run)
     python fetch_new_game_info.py --mode least-popular --max-duration-minutes 270
                                                   # resterende tijd naar de MINST
                                                   # populaire games, minst vaak
-                                                  # ververst eerst (10:30 NL-run)
+                                                  # ververst eerst (10:20 NL-run)
     python fetch_new_game_info.py --mode random --max-duration-minutes 270
                                                   # resterende tijd naar willekeurige
                                                   # games die vandaag nog niet zijn
-                                                  # ververst (18:30 NL-run)
+                                                  # ververst (18:20 NL-run)
     python fetch_new_game_info.py --limit 1000 --random --weight-refreshes
                                                   # willekeurige games, maar de minst
                                                   # vaak ververste eerst (binnen elke
@@ -237,10 +237,10 @@ DEFAULT_MAX_REQUESTS = 10000
 # run keihard zou afkappen.
 GRACEFUL_STOP_MARGIN_MINUTES = 5
 
-# De 3 geplande runs (02:30 / 10:30 / 18:30 NL-tijd) horen bij DEZELFDE
-# kalenderdag, maar DataUpdatedAt staat in UTC (02:30 NL = 00:30 UTC in de
-# zomer en 01:30 UTC in de winter). Deze verschuiving (UTC+2) groepeert
-# 00:30/08:30/16:30 UTC (zomer) en 01:30/09:30/17:30 UTC (winter) netjes op
+# De 3 geplande runs (02:20 / 10:20 / 18:20 NL-tijd) horen bij DEZELFDE
+# kalenderdag, maar DataUpdatedAt staat in UTC (02:20 NL = 00:20 UTC in de
+# zomer en 01:20 UTC in de winter). Deze verschuiving (UTC+2) groepeert
+# 00:20/08:20/16:20 UTC (zomer) en 01:20/09:20/17:20 UTC (winter) netjes op
 # één dag. De "run-dag" is dus (DataUpdatedAt in UTC + 2 uur).date().
 RUN_DAY_OFFSET = timedelta(hours=2)
 
@@ -305,7 +305,7 @@ def parse_updated_at(value):
 
 def run_day_key(dt):
     """Dag-sleutel ('run-dag') van een aware tijdstip: UTC + RUN_DAY_OFFSET.
-    Zo horen de 3 runs van één NL-dag (02:30/10:30/18:30) bij dezelfde dag,
+    Zo horen de 3 runs van één NL-dag (02:20/10:20/18:20) bij dezelfde dag,
     ook al staat DataUpdatedAt in UTC en verschuift die kloktijd tussen de
     seizoenen (zomer UTC+2, winter UTC+1)."""
     return (dt.astimezone(timezone.utc) + RUN_DAY_OFFSET).date()
@@ -767,7 +767,7 @@ def main(argv=None):
     p.add_argument("--ignore-same-day", action="store_true",
                    help="zet de 'max. 1x per dag'-regel UIT. Standaard wordt "
                         "een game die op DEZELFDE run-dag (UTC+2, dus de 3 "
-                        "runs 02:30/10:30/18:30 NL) al is ververst "
+                        "runs 02:20/10:20/18:20 NL) al is ververst "
                         "overgeslagen, op basis van DataUpdatedAt")
     p.add_argument("--weight-refreshes", action="store_true",
                    help="alleen bij --mode random (of --random): weeg de "
@@ -929,7 +929,7 @@ def main(argv=None):
 
     # ---- Max. 1x per dag ------------------------------------------------- #
     # DataUpdatedAt (UTC) wordt vergeleken op "run-dag" (UTC + 2 uur): de 3
-    # runs van één NL-dag (02:30/10:30/18:30) horen zo bij elkaar. Een game
+    # runs van één NL-dag (02:20/10:20/18:20) horen zo bij elkaar. Een game
     # die vandaag al is ververst wordt overgeslagen, zodat de tijd naar games
     # gaat die nog niet aan bod kwamen. Uitzetten: --ignore-same-day.
     run_day = run_day_key(datetime.now(timezone.utc))

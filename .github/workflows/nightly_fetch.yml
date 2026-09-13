@@ -25,16 +25,16 @@
 #          even vaak aan de beurt - geen random die iemand laat liggen.
 #  STAP 3  fetch_new_game_info.py --mode <...>: ALLE resterende tijd van het
 #          run-budget naar een selectie die per run verschilt:
-#            - 02:30 NL (00:30 UTC in de zomer / 01:30 UTC in de winter) ->
+#            - 02:20 NL (00:20 UTC in de zomer / 01:20 UTC in de winter) ->
 #              --mode popular: de MEEST populaire games (nieuwste
 #              spelersaantal per appid uit games_extra_info, anders
 #              games.jsonl);
-#            - 10:30 NL (08:30 UTC zomer / 09:30 UTC winter) -> --mode
+#            - 10:20 NL (08:20 UTC zomer / 09:20 UTC winter) -> --mode
 #              least-popular: de MINST populaire games (set met gemiddeld
 #              < 100 spelers; het gemiddelde komt uit games.jsonl +
 #              games_extra_info.jsonl), waarbij de minst vaak ververste games
 #              uit die set voorrang krijgen;
-#            - 18:30 NL (16:30 UTC zomer / 17:30 UTC winter) -> --mode random
+#            - 18:20 NL (16:20 UTC zomer / 17:20 UTC winter) -> --mode random
 #              --weight-refreshes: willekeurige games, maar de minst vaak
 #              ververste eerst (binnen elke groep random), zodat elke game op
 #              den duur aan de beurt komt.
@@ -74,14 +74,14 @@
 # effort" en startte deze runs structureel uren te laat (gemeten op 13-09-2026:
 # +1 u 42, +2 u 43 en +5 u 28) en zette ze daarna nog in de wachtrij; een
 # uitgestelde run kon zo zelfs een leeg rondje van 13 seconden worden. De drie
-# runs per dag worden daarom van BUITEN gestart, op exact 02:30, 10:30 en
-# 18:30 NL-tijd (cron-job.org met tijdzone Europe/Amsterdam - dus ook in de
+# runs per dag worden daarom van BUITEN gestart, op exact 02:20, 10:20 en
+# 18:20 NL-tijd (cron-job.org met tijdzone Europe/Amsterdam - dus ook in de
 # winter dezelfde kloktijd). Zie `on:` hieronder voor de twee API-varianten:
 #
 #   A) workflow_dispatch   POST https://api.github.com/repos/Yookiop/SteamDataOfficial/actions/workflows/nightly_fetch.yml/dispatches
-#      body {"ref":"main","inputs":{"mode":"popular","timer":"02:30 NL"}}
+#      body {"ref":"main","inputs":{"mode":"popular","timer":"02:20 NL"}}
 #   B) repository_dispatch POST https://api.github.com/repos/Yookiop/SteamDataOfficial/dispatches
-#      body {"event_type":"nightly-fetch","client_payload":{"mode":"popular","timer":"02:30 NL"}}
+#      body {"event_type":"nightly-fetch","client_payload":{"mode":"popular","timer":"02:20 NL"}}
 #
 #   Kopregels bij allebei:
 #     Authorization: Bearer <PAT>          Accept: application/vnd.github+json
@@ -89,10 +89,34 @@
 #   De PAT is een fine-grained token op DEZE repo met "Actions: read and write"
 #   (A) of "Contents: read and write" (B). Die token staat ALLEEN in
 #   cron-job.org (dat is je secret) - nooit in de repo of in een log.
-#   `mode`  : 02:30 -> popular | 10:30 -> least-popular | 18:30 -> random
+#   `mode`  : 02:20 -> popular | 10:20 -> least-popular | 18:20 -> random
 #             (bij A moet dit exact een van die vier keuzes zijn; laat je hem
 #             weg, dan raadt de workflow de taak op het UTC-uur)
 #   `timer` : vrije tekst, komt alleen in de log ("welke timer draaide dit?")
+#
+# WAAROM EXTERN IN PLAATS VAN `schedule:`
+#
+#   `schedule:` (GitHub's planner)          extern (cron-job.org -> GitHub-API)
+#   - GitHub bepaalt zelf het moment,       - JIJ bepaalt het moment, in je
+#     "best effort", vanuit een enorme        eigen tijdzone (Europe/Amsterdam)
+#     wachtrij van alle repos samen         - cron-job.org doet op dat moment
+#   - op het hele uur is het extra druk        één API-call -> GitHub start de
+#     (de meeste crons staan op :00 - de         run meteen als gewone run
+#     jouwe stonden daar ook)
+#   - gemeten op deze repo: +1 u 42,        - tijd blijft jaarrond gelijk
+#     +2 u 43 en +5 u 28 min te laat          (geen zomertijd-verschuiving)
+#   - in de winter schuift de klok 1 uur    - geen 60-dagen-inactiviteitsregel
+#     op (cron is UTC-only)                 - de workflow logt zelf welke timer
+#   - bij extreme drukte vervalt de run       hem startte (input `timer`)
+#   - stopt na 60 dagen zonder repo-activiteit
+#
+#   Nadeel van extern: één externe planner is een extra schakel (zet daar
+#   "notify on failure" aan) en je beheert een PAT. Komt er niets binnen, dan
+#   zijn de `schedule:`-regels hieronder de noodrem: uit commentaar halen en
+#   de externe job uitzetten.
+#   In BEIDE gevallen geldt de concurrency-groep: een nieuwe run wacht op de
+#   vorige (max. 1 run tegelijk), dus een run die uitloopt schuift de volgende
+#   op - dat is eigen ontwerp, geen planner-vertraging.
 #
 # Handmatig starten blijft gewoon kunnen: Actions > "Nightly fetch new game
 # info" > Run workflow (ook vanaf je telefoon) - met de input `mode` kies je
@@ -106,7 +130,7 @@ name: Nightly fetch new game info
 on:
   # Handmatig (Actions-tab, telefoon) EN extern via de GitHub API:
   #   POST /repos/Yookiop/SteamDataOfficial/actions/workflows/nightly_fetch.yml/dispatches
-  #   {"ref":"main","inputs":{"mode":"popular","timer":"02:30 NL"}}
+  #   {"ref":"main","inputs":{"mode":"popular","timer":"02:20 NL"}}
   workflow_dispatch:
     inputs:
       mode:
@@ -124,32 +148,32 @@ on:
         required: false
 
   # Ook te starten met een repository_dispatch (body:
-  #   {"event_type":"nightly-fetch","client_payload":{"mode":"popular","timer":"02:30 NL"}}
+  #   {"event_type":"nightly-fetch","client_payload":{"mode":"popular","timer":"02:20 NL"}}
   # ). Beide varianten komen uit op dezelfde stap die de timer logt.
   repository_dispatch:
     types: [nightly-fetch]
 
-  # 3x per dag: 02:30, 10:30 en 18:30 NL-tijd - ELK met een EIGEN taak.
+  # 3x per dag: 02:20, 10:20 en 18:20 NL-tijd - ELK met een EIGEN taak.
   #
   # ⚠️ DEZE CRONS STAAN UIT (13-09-2026). GitHub's planner is "best effort":
   # gemeten vertragingen van +1 u 42, +2 u 43 en +5 u 28 min, plus wachtrijtijd
   # omdat er maar 1 run tegelijk mag lopen. De timing loopt nu extern (zie de
-  # TIMING-uitleg bovenaan dit bestand): cron-job.org roept op 02:30/10:30/
-  # 18:30 NL-tijd de GitHub API aan (tijdzone Europe/Amsterdam, dus geen
+  # TIMING-uitleg bovenaan dit bestand): cron-job.org roept op 02:20/10:20/
+  # 18:20 NL-tijd de GitHub API aan (tijdzone Europe/Amsterdam, dus geen
   # zomertijd-verschuiving meer).
   # Weer op GitHub's planner vertrouwen? Haal dan `schedule:` + de drie
   # cron-regels hieronder uit commentaar (en zet de externe job uit). GitHub
   # cron werkt in UTC en kent GEEN zomertijd, dus dit zijn de zomertijden:
-  #   00:30 UTC -> popular        (02:30 NL in de zomer, 01:30 NL in de winter)
-  #   08:30 UTC -> least-popular  (10:30 NL zomer, 09:30 NL winter)
-  #   16:30 UTC -> random         (18:30 NL zomer, 17:30 NL winter)
+  #   00:20 UTC -> popular        (02:20 NL in de zomer, 01:20 NL in de winter)
+  #   08:20 UTC -> least-popular  (10:20 NL zomer, 09:20 NL winter)
+  #   16:20 UTC -> random         (18:20 NL zomer, 17:20 NL winter)
   # De drie runs zitten 8 uur uit elkaar; een run duurt max ~5,5 uur, dus ze
   # overlappen elkaar normaal niet. Een schedule draait alleen als dit bestand
   # op de DEFAULT branch (main) staat.
   # schedule:
-  #   - cron: "30 0 * * *"  # 02:30 NL -> meest populaire games
-  #   - cron: "30 8 * * *"  # 10:30 NL -> minst populaire games
-  #   - cron: "30 16 * * *" # 18:30 NL -> willekeurige games
+  #   - cron: "20 0 * * *"  # 02:20 NL -> meest populaire games
+  #   - cron: "20 8 * * *"  # 10:20 NL -> minst populaire games
+  #   - cron: "20 16 * * *" # 18:20 NL -> willekeurige games
 
 permissions:
   contents: write # needed to push the data back
@@ -243,15 +267,15 @@ jobs:
 
           # Oude GitHub-cron (alleen als die ooit weer wordt aangezet).
           case "$cron" in
-            "30 0 * * *")
-              timer="timer 1/3 - 00:30 UTC (02:30 NL zomer / 01:30 NL winter) -> popular"
-              planned_utc="00:30"; mode_scheduled="popular" ;;
-            "30 8 * * *")
-              timer="timer 2/3 - 08:30 UTC (10:30 NL zomer / 09:30 NL winter) -> least-popular"
-              planned_utc="08:30"; mode_scheduled="least-popular" ;;
-            "30 16 * * *")
-              timer="timer 3/3 - 16:30 UTC (18:30 NL zomer / 17:30 NL winter) -> random"
-              planned_utc="16:30"; mode_scheduled="random" ;;
+            "20 0 * * *")
+              timer="timer 1/3 - 00:20 UTC (02:20 NL zomer / 01:20 NL winter) -> popular"
+              planned_utc="00:20"; mode_scheduled="popular" ;;
+            "20 8 * * *")
+              timer="timer 2/3 - 08:20 UTC (10:20 NL zomer / 09:20 NL winter) -> least-popular"
+              planned_utc="08:20"; mode_scheduled="least-popular" ;;
+            "20 16 * * *")
+              timer="timer 3/3 - 16:20 UTC (18:20 NL zomer / 17:20 NL winter) -> random"
+              planned_utc="16:20"; mode_scheduled="random" ;;
             "")
               timer="" ;;
             *)
@@ -292,12 +316,12 @@ jobs:
           else
             # Externe timer zonder `mode`: schat de taak op het UTC-uur. Elk
             # tijdstip dekt beide seizoenen (zomer = UTC+2, winter = UTC+1):
-            # 02:30 NL = 00:30/01:30 UTC, 10:30 NL = 08:30/09:30 UTC,
-            # 18:30 NL = 16:30/17:30 UTC.
+            # 02:20 NL = 00:20/01:20 UTC, 10:20 NL = 08:20/09:20 UTC,
+            # 18:20 NL = 16:20/17:20 UTC.
             case "$hour" in
-              0|1)   mode="popular" ;;        # 02:30 NL
-              8|9)   mode="least-popular" ;;  # 10:30 NL
-              16|17) mode="random" ;;         # 18:30 NL
+              0|1)   mode="popular" ;;        # 02:20 NL
+              8|9)   mode="least-popular" ;;  # 10:20 NL
+              16|17) mode="random" ;;         # 18:20 NL
               *)     mode="popular" ;;        # handmatig op een ander uur
             esac
             echo "> taak: modus = ${mode} (geen timer/mode meegegeven; afgeleid van UTC-uur ${hour})"
@@ -460,8 +484,8 @@ jobs:
         # Draait ALTIJD (los van het resultaat van stap 1 en 2): de modus-taak
         # krijgt alle tijd die na stap 1 + 2 nog over is, min COMMIT_MIN voor
         # de slotcommit. De modus komt uit de eerste stap, die hem afleidt uit
-        # de timer die deze run startte (02:30 NL = popular, 10:30 NL =
-        # least-popular, 18:30 NL = random); de input `mode` van een
+        # de timer die deze run startte (02:20 NL = popular, 10:20 NL =
+        # least-popular, 18:20 NL = random); de input `mode` van een
         # handmatige run gaat voor.
         #
         # Dynamisch budget: (run-budget - afrondmarge - al gebruikt) min
@@ -511,7 +535,7 @@ jobs:
             exit 0
           fi
 
-          # Bij de random-taak (18:30 NL) wegen we op het aantal keren dat een
+          # Bij de random-taak (18:20 NL) wegen we op het aantal keren dat een
           # game al is ververst: de minst vaak ververste games eerst, binnen
           # elke groep willekeurig. Zo komt elke game op den duur aan de beurt
           # i.p.v. dat een uniforme steekproef steeds dezelfde games pakt.

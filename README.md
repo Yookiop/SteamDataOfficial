@@ -179,14 +179,14 @@ python fetch_new_game_info.py --player-limit 50   # alleen games met gemiddeld
                                                   # < 50 spelers pollen
 python fetch_new_game_info.py --mode popular --max-duration-minutes 270
                                              # resterende tijd naar de MEEST
-                                             # populaire games (02:30 NL-run)
+                                             # populaire games (02:20 NL-run)
 python fetch_new_game_info.py --mode least-popular --max-duration-minutes 270
                                              # resterende tijd naar de MINST
                                              # populaire games: minst vaak
-                                             # ververst eerst (10:30 NL-run)
+                                             # ververst eerst (10:20 NL-run)
 python fetch_new_game_info.py --mode random --max-duration-minutes 270
                                              # resterende tijd naar willekeurige
-                                             # games (18:30 NL-run)
+                                             # games (18:20 NL-run)
 python fetch_new_game_info.py --limit 3500 --random --weight-refreshes
                                              # willekeurige games, maar de minst
                                              # vaak ververste eerst (binnen elke
@@ -249,11 +249,11 @@ geweest, wordt in fase 2 en 3 overgeslagen. `--limit` wordt in deze modus
 draait elke geplande run **één** selectie met het volledige tijdsbudget. Elk
 van de 3 runs per dag krijgt zo zijn eigen taak:
 
-- `--mode popular` (02:30 NL) — de **meest populaire** games: aflopend op het
+- `--mode popular` (02:20 NL) — de **meest populaire** games: aflopend op het
   laatste bekende spelersaantal per game (de nieuwste `games_extra_info`-regel,
   dus `appid_<hoogste nummer>` / nieuwste `DataUpdatedAt`; staat het daar niet
   in, dan valt het terug op `games.jsonl`). Dit is ook de standaardmodus.
-- `--mode least-popular` (10:30 NL) — de **minst populaire** games. Eerst wordt
+- `--mode least-popular` (10:20 NL) — de **minst populaire** games. Eerst wordt
   de "onderste" set bepaald: games met een **gemiddeld** spelersaantal onder
   `--least-max-avg` (default **100**), waarbij het gemiddelde wordt berekend uit
   de master-snapshot (`games.jsonl`) **+** alle `games_extra_info`-regels van die
@@ -264,8 +264,8 @@ van de 3 runs per dag krijgt zo zijn eigen taak:
   ververst. Games zonder enkele spelerswaarde vallen buiten de set ('onbekend'
   is niet hetzelfde als 'weinig spelers'). De grens is aanpasbaar met
   `--least-max-avg <N>`.
-- `--mode random` (18:30 NL) — **willekeurige** games die die dag nog niet aan
-  bod kwamen. De 18:30-run geeft hier `--weight-refreshes` mee: de volgorde
+- `--mode random` (18:20 NL) — **willekeurige** games die die dag nog niet aan
+  bod kwamen. De 18:20-run geeft hier `--weight-refreshes` mee: de volgorde
   wordt dan gewogen op het **aantal keren dat een game al is ververst** (het
   aantal `games_extra_info`-regels per appid) — minst vaak ververst eerst, en
   binnen elke groep willekeurig. Zo komen alle games op den duur ongeveer even
@@ -282,8 +282,8 @@ python fetch_new_game_info.py --mode random --weight-refreshes --max-duration-mi
 een game **overgeslagen die op dezelfde "run-dag" al is ververst**. Dat wordt
 bepaald uit de kolom `DataUpdatedAt`: de run-dag is
 `(DataUpdatedAt in UTC + 2 uur).date()`. Die `+2 uur` (`UTC+2`) zorgt dat de 3
-runs van één NL-dag (02:30/10:30/18:30) bij elkaar horen — de zomer- en
-wintertijden (00:30/08:30/16:30 vs. 01:30/09:30/17:30 UTC) vallen allebei in
+runs van één NL-dag (02:20/10:20/18:20) bij elkaar horen — de zomer- en
+wintertijden (00:20/08:20/16:20 vs. 01:20/09:20/17:20 UTC) vallen allebei in
 dezelfde run-dag. Zo ververst geen enkele game 2× op een dag en
 gaat de tijd naar games die nog niet aan bod kwamen. Uitzetten kan met
 `--ignore-same-day` (bv. voor een handmatige extra run).
@@ -294,13 +294,16 @@ gaat de tijd naar games die nog niet aan bod kwamen. Uitzetten kan met
 in **één job** met een **dynamisch tijdsbudget** (niets hardcoded):
 
 > **Schema (sinds 2026-09-13):** de workflow draait **automatisch 3× per
-> dag** — **02:30, 10:30 en 18:30 NL-tijd**. De timing staat **niet** meer op
+> dag** — **02:20, 10:20 en 18:20 NL-tijd**. De timing staat **niet** meer op
 > GitHub's eigen planner: die is "best effort" en startte de runs gemeten 1,5
 > tot 5,5 uur te laat. In plaats daarvan roept **cron-job.org** (tijdzone
 > `Europe/Amsterdam`) op die drie tijdstippen de GitHub-API aan, met de taak
 > meteen meegegeven (`popular` / `least-popular` / `random`); de workflow
-> logt zelf welke timer hem startte. Werkt alleen als dit bestand op de
-> **default branch (main)** staat. Handmatig starten blijft mogelijk:
+> logt zelf welke timer hem startte. Het verschil zit in **wie het
+> startmoment bepaalt**: bij `schedule` doet GitHub dat zelf (best effort,
+> vanuit een wachtrij met alle repos, run kan vervallen, en de klok schuift in
+> de winter 1 uur), extern bepaal jij het en start de run meteen. Werkt alleen
+> als dit bestand op de **default branch (main)** staat. Handmatig starten blijft mogelijk:
 > Actions → *Nightly fetch new game info* → *Run workflow* (met de input
 > `mode` kies je dan zelf `popular`, `least-popular` of `random`). De repo is
 > public, dus Actions-minuten zijn gratis; de runs zitten 8 uur uit elkaar en
@@ -321,7 +324,7 @@ Elke run doet hetzelfde voorwerk en daarna zijn eigen taak:
    checkpoints zouden niets opleveren.
 3. **eigen taak** — `fetch_new_game_info.py --mode <...>` met **alle
    resterende tijd** (min `COMMIT_MIN` voor de slotcommit): `popular`
-   (02:30 NL), `least-popular` (10:30 NL) of `random` (18:30 NL). De modus
+   (02:20 NL), `least-popular` (10:20 NL) of `random` (18:20 NL). De modus
    komt van de timer die de run startte (de externe trigger geeft hem mee);
    een handmatige run kiest hem met de input `mode`, en zonder timer valt de
    workflow terug op het UTC-uur. Elke 5 minuten een checkpoint-commit.
