@@ -56,6 +56,13 @@ date.csv en haalt de datumdelen daar vandaan.
 Output staat standaard naast de invoer (data/). De bestanden zijn UTF-8 met
 BOM (utf-8-sig), zodat Excel de tekst/valuta-codes goed toont.
 
+Deze CSV's zijn puur voor analyse/visualisatie (Excel, Power BI, de app in
+viz/): ze staan in .gitignore (data/*.csv) en worden NIET gecommit. De
+fetch-scripts en dit script lezen de jsonl-bestanden rechtstreeks, dus er is
+nooit een CSV nodig om data op te halen of te verwerken - draai dit script
+wanneer je verse tabellen wilt (bv. vóór je aan een video of visualisatie
+begint).
+
 Gebruik:
     python jsonl_to_table.py
     python jsonl_to_table.py --input data/games.jsonl

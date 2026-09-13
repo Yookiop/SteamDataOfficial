@@ -105,15 +105,15 @@ tijdsbudget EEN selectie:
   popular        de MEEST populaire games: aflopend op het laatste bekende
                  spelersaantal (de nieuwste games_extra_info-regel van die
                  game, dus appid_<hoogste nummer> / nieuwste DataUpdatedAt;
-                 staat het daar niet in, dan valt het terug op games.csv).
+                 staat het daar niet in, dan valt het terug op games.jsonl).
                  Dit is de standaard.
 
   least-popular  de MINST populaire games. Eerst wordt de "onderste" set
                  bepaald: games met een GEMIDDELD spelersaantal onder
                  --least-max-avg (default 100), waarbij het gemiddelde wordt
-                 berekend uit de master-snapshot (games.csv) + alle
+                 berekend uit de master-snapshot (games.jsonl) + alle
                  games_extra_info-regels van die game
-                 (games_extra_info.csv). Binnen die set komen de games die
+                 (games_extra_info.jsonl). Binnen die set komen de games die
                  het MINST VAAK zijn ververst eerst (aantal keren dat de
                  appid in games_extra_info staat), daarna de laagste
                  spelersaantallen. Zo krijgen alle lage games een beurt
@@ -219,6 +219,11 @@ DEFAULT_JITTER = 0.1
 DEFAULT_TIMEOUT = 30
 DEFAULT_RETRIES = 6
 DEFAULT_MAX_REQUESTS = 10000
+
+# Al het lezen gaat via de jsonl-bestanden (data/games.jsonl +
+# data/games_extra_info.jsonl, met alle rotatiedelen). De CSV-tabellen uit
+# jsonl_to_table.py zijn er alleen voor analyse/visualisatie en staan in
+# .gitignore - deze logica heeft ze NOOIT nodig.
 
 # Marge (minuten) die het script aanhoudt vóór het opgegeven duurbudget
 # (--max-duration-minutes): netjes stoppen vóór de GitHub step-timeout de
@@ -738,8 +743,8 @@ def main(argv=None):
                    default=LEAST_POPULAR_MAX_AVG,
                    help=f"grens voor --mode least-popular: alleen games met "
                         f"een GEMIDDELD spelersaantal onder deze waarde "
-                        f"(gemiddelde uit games.csv + alle "
-                        f"games_extra_info.csv-regels; default: "
+                        f"(gemiddelde uit games.jsonl + alle "
+                        f"games_extra_info.jsonl-regels; default: "
                         f"{LEAST_POPULAR_MAX_AVG})")
     p.add_argument("--ignore-same-day", action="store_true",
                    help="zet de 'max. 1x per dag'-regel UIT. Standaard wordt "
@@ -854,8 +859,8 @@ def main(argv=None):
     mode_label = MODE_LABELS.get(mode, mode)
 
     # Gemiddeld spelersaantal van een game over ALLES wat we weten: de
-    # master-snapshot (games.csv) + al zijn games_extra_info-regels
-    # (games_extra_info.csv). Games zonder spelerswaarde -> None (onbekend).
+    # master-snapshot (games.jsonl) + al zijn games_extra_info-regels
+    # (games_extra_info.jsonl). Games zonder spelerswaarde -> None (onbekend).
     def avg_players_incl_master(aid):
         s, n = player_stats.get(aid, (0, 0))
         mv = master[aid].get("last_seen_player_count")

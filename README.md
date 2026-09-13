@@ -75,12 +75,12 @@ mislukte).
 > `release_date_format = 2003-09-12` + `release_date = "12 Sep, 2003"`. Dit
 > zit in beide fetch-scripts (`clamp_steam_launch` in `slim_record`); de
 > eerder verzamelde data is eenmalig op die manier gemigreerd (min
-> releasedatum in `games.csv` is nu 2003-09-12).
+> releasedatum in `games.jsonl` is nu 2003-09-12).
 
-De **basis** (`games.jsonl`/`games.csv`) heeft géén `appid_amount` — elke
+De **basis** (`games.jsonl`) heeft géén `appid_amount` — elke
 appid komt er maar 1× in voor. De doorlopende per-game nummering
 (`appid_amount` = `<appid>_1`, `_2`, `_3`, ...) leeft uitsluitend in
-`games_extra_info.jsonl`/`.csv` (was `player_history`), waar elke regel een
+`games_extra_info.jsonl` (was `player_history`), waar elke regel een
 aparte momentopname per game is (elke regel heeft ook `DataUpdatedAt` — de
 datumtijd waarop die momentopname is geschreven, in **UTC** — handig voor
 het verloop van spelersaantallen/reviews over de tijd). De review-velden in
@@ -210,12 +210,12 @@ van de 3 runs per dag krijgt zo zijn eigen taak:
 - `--mode popular` (01:00 NL) — de **meest populaire** games: aflopend op het
   laatste bekende spelersaantal per game (de nieuwste `games_extra_info`-regel,
   dus `appid_<hoogste nummer>` / nieuwste `DataUpdatedAt`; staat het daar niet
-  in, dan valt het terug op `games.csv`). Dit is ook de standaardmodus.
+  in, dan valt het terug op `games.jsonl`). Dit is ook de standaardmodus.
 - `--mode least-popular` (09:00 NL) — de **minst populaire** games. Eerst wordt
   de "onderste" set bepaald: games met een **gemiddeld** spelersaantal onder
   `--least-max-avg` (default **100**), waarbij het gemiddelde wordt berekend uit
-  de master-snapshot (`games.csv`) **+** alle `games_extra_info`-regels van die
-  game (`games_extra_info.csv`). Binnen die set komen de games die het **minst
+  de master-snapshot (`games.jsonl`) **+** alle `games_extra_info`-regels van die
+  game (`games_extra_info.jsonl`). Binnen die set komen de games die het **minst
   vaak zijn ververst** eerst (het aantal keren dat de appid in
   `games_extra_info` staat), daarna de laagste spelersaantallen. Zo krijgt elke
   lage game een beurt i.p.v. dat telkens dezelfde niet-populaire games worden
@@ -262,24 +262,22 @@ in **één job** met een **dynamisch tijdsbudget** (niets hardcoded):
 
 Elke run doet hetzelfde voorwerk en daarna zijn eigen taak:
 
-0. **CSV-tabellen** — `jsonl_to_table.py` ververst `games.csv`,
-   `game_genres/categories/publishers.csv`, `games_extra_info.csv` en
-   `date.csv` uit de actuele jsonl-bestanden.
 1. **nieuwe games** — `fetch_games_initial.py` haalt alle nog onbekende
    appids op, met een budget van `RUN_BUDGET_MIN − RUN_SHUTDOWN_MIN −
    (al gebruikt) − MAIN_MIN_MIN`; elke 5 minuten een checkpoint-commit.
 2. **eigen taak** — `fetch_new_game_info.py --mode <...>` met **alle
-   resterende tijd** (min `TABLE_MIN` reserve voor de slot-CSV's): `popular`
+   resterende tijd** (min `COMMIT_MIN` voor de slotcommit): `popular`
    (23:00 UTC / 01:00 NL), `least-popular` (07:00 UTC / 09:00 NL) of `random`
    (15:00 UTC / 17:00 NL). Welke modus het is leidt de workflow af uit het
    UTC-uur; een handmatige run kan het met de input `mode` overschrijven. Elke
    5 minuten een checkpoint-commit.
-3. **slot** — de data wordt gecommit + gepusht. De jsonl/json-bestanden gaan
-   **elke run** mee; de **CSV's alleen op zondag** (run-dag, UTC+2): alleen
-   dan draait `jsonl_to_table.py` hier nóg een keer op de nieuwe jsonl-data en
-   gaat heel `data/` mee. Ze zijn samen ~50 MB en zouden de git-historie
-   anders met ~150 MB per dag laten groeien. Deze stap draait ook als een
-   eerdere stap is misgegaan (`if: always()`).
+3. **slot** — de data wordt gecommit + gepusht: alleen de **bronbestanden**
+   (`data/*.jsonl` en `*.json`). Deze stap draait ook als een eerdere stap is
+   misgegaan (`if: always()`).
+
+De **CSV-tabellen zitten niet in deze pijplijn**: die maak je lokaal met
+`jsonl_to_table.py` en staan in `.gitignore` (zie "Output" hierboven). De
+workflow committ dus nooit CSV's.
 
 In **alle** runs geldt de **max. 1× per dag**-regel: een game die op dezelfde
 run-dag al is ververst wordt overgeslagen (zie `--mode` hierboven).
@@ -291,7 +289,7 @@ env:
   RUN_BUDGET_MIN: "330"     # totale wall-clock budget van de hele run
   RUN_SHUTDOWN_MIN: "5"     # laatste minuten: alleen afronden (geen scriptwerk)
   MAIN_MIN_MIN: "20"        # minimaal gereserveerd voor stap 2 (de modus-taak)
-  TABLE_MIN: "10"           # reserve voor de slot-jsonl_to_table (de CSV's)
+  COMMIT_MIN: "5"           # reserve voor de slotcommit (git add/commit/push)
 ```
 
 Beide scripts stoppen **5 minuten vóór hun eigen budget** (netjes afgerond:
@@ -337,18 +335,22 @@ compleet is.
 > `games_extra_info.jsonl`/`games_extra_info.csv`, en de per-game nummering
 > begint daarin bij `_1` (de basis heeft geen `appid_amount` meer).
 
-`data/` hoort **bewust bij de repo** en staat **niet** in `.gitignore` — de
-data wordt mee gecommit. Daarom staat de API key er ook niet in: die leeft
-encoded buiten de repo (zie "Eerste doorgang" hierboven).
+`data/` hoort **bewust bij de repo**: de **bronbestanden** (jsonl/json) worden
+mee gecommit, dus de data staat niet in `.gitignore`. Daarom staat de API key er
+ook niet in: die leeft encoded buiten de repo (zie "Eerste doorgang" hierboven).
+De **CSV-tabellen** zijn afgeleid en staan wél in `.gitignore` (zie hieronder).
 
-> 🧮 **CSV's zijn afgeleide bestanden (full refresh).** `games.csv`,
-> `game_genres.csv`, `game_categories.csv`, `game_publishers.csv`,
+> 🧮 **CSV's zijn lokale, afgeleide bestanden — ze staan in `.gitignore`.**
+> `games.csv`, `game_genres.csv`, `game_categories.csv`, `game_publishers.csv`,
 > `date.csv` en `games_extra_info.csv` worden door `jsonl_to_table.py`
-> **elke run volledig overschreven** op basis van de actuele jsonl-
-> bestanden. In de GitHub Action worden ze **alleen op zondag meegecommit**
-> (de jsonl/json-bestanden élke run) — zie stap 3 hierboven. Je hoeft ze dus nooit zelf te legen — ook niet na een
-> `--reset` of het leeggooien van de json-data: een verse
-> `jsonl_to_table.py`-run regenereert alles opnieuw (bij een lege
+> **volledig overschreven** op basis van de actuele jsonl-bestanden. Ze zijn er
+> alleen voor **analyse en de visualisaties** (`viz/`) — nooit als bron: de
+> fetch-scripts én `jsonl_to_table.py` lezen de jsonl-bestanden rechtstreeks,
+> dus er is geen CSV nodig om data op te halen of te verwerken. Draai
+> `python jsonl_to_table.py` wanneer je verse tabellen wilt (bv. vóór je aan
+> een video of visualisatie begint) en commit ze niet. Je hoeft ze dus nooit
+> zelf te legen — ook niet na een `--reset` of het leeggooien van de json-data:
+> een verse `jsonl_to_table.py`-run regenereert alles opnieuw (bij een lege
 > `games.jsonl` krijg je `games.csv` met alleen de header, die weer
 > meegroeit zodra je opnieuw ophaalt).
 >
@@ -512,9 +514,10 @@ python -m http.server 8090
 # open http://localhost:8090/viz/index.html
 ```
 
-De pagina leest `data/games.csv` + `data/date.csv` bij elke keer laden, dus
-na een verse run van de fetch-scripts + `jsonl_to_table.py` staat er meteen
-de nieuwste data in. Houd het tabblad zichtbaar tijdens een MP4-opname.
+De pagina leest `data/games.csv` + `data/date.csv` bij elke keer laden. Die
+CSV's zitten niet in git, dus draai eerst `python jsonl_to_table.py` (op de
+jsonl-bestanden van de laatste run) en ververs de pagina. Houd het tabblad
+zichtbaar tijdens een MP4-opname.
 
 ## ⚠️ Belangrijk
 

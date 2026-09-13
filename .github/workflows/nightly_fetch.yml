@@ -1,11 +1,8 @@
-# Steam data run: CSV-tabellen + nieuwe games + extra info (3x per dag,
-# ELKE run een EIGEN taak)
+# Steam data run: nieuwe games + extra info (3x per dag, ELKE run een EIGEN
+# taak)
 #
 # Elke geplande run doet exact hetzelfde voorwerk en daarna een eigen taak:
 #
-#  STAP 0  jsonl_to_table.py - de CSV-tabellen (games.csv,
-#          game_genres/categories/publishers.csv, games_extra_info.csv,
-#          date.csv) volledig verversen uit de actuele jsonl-bestanden.
 #  STAP 1  fetch_games_initial.py (geen --limit): alle nog onbekende appids
 #          uit de officiele app-lijst ophalen. Het script krijgt een
 #          dynamisch budget (het hele run-budget min de afrondmarge en min
@@ -18,10 +15,10 @@
 #          run-budget naar een selectie die per run verschilt:
 #            - 23:00 UTC (01:00 NL) -> --mode popular: de MEEST populaire
 #              games (nieuwste spelersaantal per appid uit
-#              games_extra_info, anders games.csv);
+#              games_extra_info, anders games.jsonl);
 #            - 07:00 UTC (09:00 NL) -> --mode least-popular: de MINST
 #              populaire games (set met gemiddeld < 100 spelers; het
-#              gemiddelde komt uit games.csv + games_extra_info.csv),
+#              gemiddelde komt uit games.jsonl + games_extra_info.jsonl),
 #              waarbij de minst vaak ververste games uit die set voorrang
 #              krijgen;
 #            - 15:00 UTC (17:00 NL) -> --mode random --weight-refreshes:
@@ -36,12 +33,11 @@
 # enkele game 2x op een dag ververst en gaat de tijd naar games die nog niet
 # aan bod kwamen.
 #
-# CSV's ALLEEN OP ZONDAG: de jsonl/json-bestanden (de bron) worden ELKE run
-# meegecommit, maar de CSV's (~50 MB per keer) alleen wanneer de run-dag een
-# zondag is. In dat geval draait de slotstap jsonl_to_table.py nog een keer op
-# de NIEUWE data en wordt alles in data/ gecommit; op de andere dagen worden
-# alleen de jsonl/json-bestanden gecommit en blijven de CSV's zoals ze zijn.
-# Zo groeit de git-historie niet met ~150 MB per dag.
+# GEEN CSV'S IN DEZE RUN: de workflow commit alleen de BRONbestanden (jsonl/
+# json). De CSV-tabellen zijn puur voor de visualisaties: die maak je lokaal
+# met jsonl_to_table.py en ze staan in .gitignore (data/*.csv). De fetch-logica
+# leest de jsonl-bestanden rechtstreeks (via data_rotation.iter_lines), dus er
+# is nergens een CSV voor nodig.
 #
 # Time budget (DYNAMIC, nothing hardcoded): dit is EEN job en GitHub kapt een
 # job na 6 uur (360 min) hard af, dus de run budgetteert zichzelf.
@@ -49,7 +45,8 @@
 # RUN_SHUTDOWN_MIN (=5) is het venster waarin alleen nog wordt afgerond.
 # MAIN_MIN_MIN (=20) is het minimum dat voor stap 2 wordt gereserveerd (zodat
 # de eigen taak ook op een dag met veel nieuwe games altijd draait) en
-# TABLE_MIN (=10) is de reserve voor de slot-jsonl_to_table. Beide scripts
+# COMMIT_MIN (=5) is de reserve voor de slotcommit (git add/commit/push van
+# de jsonl-bestanden). Beide scripts
 # stoppen zelf 5 min voor hun eigen budget (--max-duration-minutes) en trekken
 # daarna nog wat tijd uit voor het wegschrijven; die 5 min wordt in de stap
 # zelf weer bij het scriptbudget opgeteld. Dank zij de 5-min-checkpoints
@@ -114,8 +111,8 @@ permissions:
 #   MAIN_MIN_MIN     = minimum dat voor de modus-taak (stap 2) wordt
 #                      gereserveerd, ook als stap 1 het budget bijna
 #                      opsoupeert: zo draait elke run echt zijn eigen taak
-#   TABLE_MIN        = reserve voor de slot-jsonl_to_table (de CSV's van de
-#                      nieuwe data; alleen op zondag)
+#   COMMIT_MIN       = reserve voor de slotcommit (git add/commit/push van de
+#                      jsonl-bestanden)
 # Beide scripts stoppen zelf al 5 min vóór hun eigen budget
 # (--max-duration-minutes, GRACEFUL_STOP_MARGIN_MINUTES) en trekken daarna
 # nog ~1-3 min uit voor het wegschrijven (master/CSV's); daarom komt die 5
@@ -125,7 +122,7 @@ env:
   RUN_BUDGET_MIN: "330"
   RUN_SHUTDOWN_MIN: "5"
   MAIN_MIN_MIN: "20"
-  TABLE_MIN: "10"
+  COMMIT_MIN: "5"
 
 # Never run two runs at the same time; a running run is not cancelled, a
 # new one waits.
@@ -139,10 +136,9 @@ jobs:
     timeout-minutes: 355 # Hard cap of a GitHub-hosted job is 360 min. Stap 1
                          # krijgt RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN -
                          # MAIN_MIN_MIN minuten; stap 2 krijgt de tijd die
-                         # daarna OVER is (min TABLE_MIN reserve voor de
-                         # slot-CSV's). De 5-min-checkpoints in beide stappen
-                         # betekenen dat een harde job-timeout hooguit ~5 min
-                         # werk kost.
+                         # daarna OVER is (min COMMIT_MIN voor de slotcommit).
+                         # De 5-min-checkpoints in beide stappen betekenen dat
+                         # een harde job-timeout hooguit ~5 min werk kost.
     # API key as job-level env var: the `secrets` context is NOT allowed in
     # an `if:` condition (GitHub error "Unrecognized named-value:
     # 'secrets'"), but it IS allowed in `env`. env.STEAM_API_KEY makes the
@@ -186,33 +182,9 @@ jobs:
           fi
           # De "run-dag" (UTC+2): de 3 runs van een NL-dag horen bij elkaar.
           run_day="$(date -u -d '+2 hours' +%Y-%m-%d)"
-          # CSV's worden ALLEEN op zondag meegecommit (~50 MB per keer; op de
-          # andere dagen zou dat de git-historie met ~150 MB per dag laten
-          # groeien). De jsonl/json-bestanden gaan altijd mee.
-          if [ "$(date -u -d '+2 hours' +%u)" = "7" ]; then
-            csv_commit="true"
-          else
-            csv_commit="false"
-          fi
-          echo "> run-dag: $run_day | CSV's committen: $csv_commit (alleen op zondag)"
+          echo "> run-dag: $run_day"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "run_day=$run_day" >> "$GITHUB_OUTPUT"
-          echo "csv_commit=$csv_commit" >> "$GITHUB_OUTPUT"
-
-      # Stap 0: de CSV-tabellen verversen uit de jsonl-bestanden van de vorige
-      # run (games.csv, games_extra_info.csv, enz.). Er wordt hier NIETS
-      # gecommit: de CSV's gaan alleen op zondag mee (zie de slotstap). Aan het
-      # eind van de run draait dit script nog een keer, dan op de NIEUWE
-      # jsonl-data.
-      - id: tables
-        name: jsonl_to_table (start) - CSV-tabellen verversen
-        timeout-minutes: 30
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -u
-          python jsonl_to_table.py
-          echo "[$(date -u +'%H:%M:%S')] CSV-tabellen ververst (committen gebeurt alleen op zondag, in de slotstap)"
 
       # Stap 1: nieuwe games ophalen via de keyed Web API (heeft de API key
       # nodig). Het budget is DYNAMISCH: het hele run-budget min de
@@ -232,10 +204,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Checkpoints bevatten alleen de jsonl/json-bestanden: de CSV's zijn
-          # afgeleid en gaan alleen op zondag mee (scheelt ~50 MB per commit).
+          # Checkpoints bevatten alleen de jsonl/json-bestanden: de CSV-tabellen
+          # staan in .gitignore (data/*.csv) en worden lokaal gemaakt.
           commit_checkpoint() {
-            git add data/ ':(exclude)data/*.csv'
+            git add data/
             if git diff --cached --quiet; then
               echo "[$(date -u +'%H:%M:%S')] no changes to commit"
             else
@@ -293,13 +265,13 @@ jobs:
       - id: main
         name: Modus-taak (popular / least-popular / random, dynamisch budget)
         # Draait ALTIJD (los van het resultaat van stap 1): de modus-taak
-        # krijgt alle tijd die na stap 0 + stap 1 nog over is, min TABLE_MIN
-        # voor de slot-CSV's. De modus komt uit de eerste stap
+        # krijgt alle tijd die na stap 1 nog over is, min COMMIT_MIN voor de
+        # slotcommit. De modus komt uit de eerste stap
         # (23:00 UTC = popular, 07:00 UTC = least-popular, 15:00 UTC =
         # random); de input `mode` van een handmatige run gaat voor.
         #
         # Dynamisch budget: (run-budget - afrondmarge - al gebruikt) min
-        # TABLE_MIN; het script stopt zelf 5 min voor die grens en die marge
+        # COMMIT_MIN; het script stopt zelf 5 min voor die grens en die marge
         # wordt hier weer opgeteld (GRACE_MIN). Is er te weinig tijd over
         # (< MIN_STEP_MIN), dan slaat de stap zichzelf over en pakt de
         # volgende run het op. Zoals in stap 1 elke 5 minuten een checkpoint.
@@ -311,10 +283,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Checkpoints bevatten alleen de jsonl/json-bestanden: de CSV's zijn
-          # afgeleid en gaan alleen op zondag mee (scheelt ~50 MB per commit).
+          # Checkpoints bevatten alleen de jsonl/json-bestanden: de CSV-tabellen
+          # staan in .gitignore (data/*.csv) en worden lokaal gemaakt.
           commit_checkpoint() {
-            git add data/ ':(exclude)data/*.csv'
+            git add data/
             if git diff --cached --quiet; then
               echo "[$(date -u +'%H:%M:%S')] no changes to commit"
             else
@@ -335,8 +307,8 @@ jobs:
           now_epoch=$(date -u +%s)
           elapsed_min=$(( (now_epoch - start_epoch) / 60 ))
           left_min=$(( RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN - elapsed_min ))
-          script_min=$(( left_min - TABLE_MIN + GRACE_MIN ))
-          echo "> modus: ${MODE} | run-budget ${RUN_BUDGET_MIN} min | al gebruikt ~${elapsed_min} min | nog ${left_min} min (${TABLE_MIN} min reserve voor de slot-CSV's) | script-budget ${script_min} min"
+          script_min=$(( left_min - COMMIT_MIN + GRACE_MIN ))
+          echo "> modus: ${MODE} | run-budget ${RUN_BUDGET_MIN} min | al gebruikt ~${elapsed_min} min | nog ${left_min} min (${COMMIT_MIN} min reserve voor de slotcommit) | script-budget ${script_min} min"
 
           if [ "$script_min" -le "$MIN_STEP_MIN" ]; then
             echo "> Te weinig tijd over voor de modus-taak (${script_min} min <= ${MIN_STEP_MIN} min) - overgeslagen; de volgende run pakt het op."
@@ -372,12 +344,11 @@ jobs:
             exit "$status"
           fi
 
-      # Slot: de data committen. De jsonl/json-bestanden gaan ELKE run mee; de
-      # CSV's alleen als de run-dag een zondag is (dan is de groei van de
-      # git-historie ~1/7). Alleen dan wordt jsonl_to_table.py hier nog een
-      # keer gedraaid, op de nieuwe jsonl-data. Draait ook als een eerdere
+      # Slot: de data committen. Alleen de BRONbestanden (jsonl/json); de
+      # CSV-tabellen staan in .gitignore en maak je lokaal met
+      # jsonl_to_table.py (voor de visualisaties). Draait ook als een eerdere
       # stap is misgegaan (if: always()).
-      - name: Data committen (jsonl altijd, CSV's alleen op zondag)
+      - name: Data committen (jsonl/json)
         if: always()
         timeout-minutes: 30
         shell: bash
@@ -385,20 +356,10 @@ jobs:
           set -u
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          CSV_COMMIT="${{ steps.mode.outputs.csv_commit }}"
-          if [ "$CSV_COMMIT" = "true" ]; then
-            echo "> run-dag is zondag: CSV-tabellen verversen en meecommitten."
-            python jsonl_to_table.py || echo "! jsonl_to_table.py eindigde met een fout - de rest van data/ wordt alsnog gecommit."
-            git add data/
-            MSG="data: Steam data run + csv tables (UTC $(date -u +'%Y-%m-%d %H:%M'))"
-          else
-            echo "> geen zondag: alleen de jsonl/json-bestanden worden gecommit (de CSV's worden op zondag ververst + gecommit)."
-            git add data/ ':(exclude)data/*.csv'
-            MSG="data: Steam data run (UTC $(date -u +'%Y-%m-%d %H:%M'))"
-          fi
+          git add data/
           if git diff --cached --quiet; then
             echo "No changes in data/ - nothing to commit."
           else
-            git commit -m "$MSG"
+            git commit -m "data: Steam data run (UTC $(date -u +'%Y-%m-%d %H:%M'))"
             git push origin HEAD:main
           fi
