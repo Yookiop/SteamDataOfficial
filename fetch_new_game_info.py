@@ -98,6 +98,38 @@ selectie). Voorbeeld:
 
     python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
 
+Met --mode <popular|least-popular|random> (bedoeld voor de 3 geplande
+GitHub-runs: 01:00 / 09:00 / 17:00 NL-tijd) krijgt het volledige
+tijdsbudget EEN selectie:
+
+  popular        de MEEST populaire games: aflopend op het laatste bekende
+                 spelersaantal (de nieuwste games_extra_info-regel van die
+                 game, dus appid_<hoogste nummer> / nieuwste DataUpdatedAt;
+                 staat het daar niet in, dan valt het terug op games.csv).
+                 Dit is de standaard.
+
+  least-popular  de MINST populaire games. Eerst wordt de "onderste" set
+                 bepaald: games met een GEMIDDELD spelersaantal onder
+                 --least-max-avg (default 100), waarbij het gemiddelde wordt
+                 berekend uit de master-snapshot (games.csv) + alle
+                 games_extra_info-regels van die game
+                 (games_extra_info.csv). Binnen die set komen de games die
+                 het MINST VAAK zijn ververst eerst (aantal keren dat de
+                 appid in games_extra_info staat), daarna de laagste
+                 spelersaantallen. Zo krijgen alle lage games een beurt
+                 i.p.v. dat telkens dezelfde niet-populaire games worden
+                 ververst. Games zonder enkele spelerswaarde vallen buiten
+                 de set ('onbekend' is niet hetzelfde als 'weinig spelers').
+
+  random         compleet willekeurig (uniforme steekproef).
+
+MAX. 1x PER DAG: in ALLE modi (ook --top_bottom_random) wordt een game
+overgeslagen die op dezelfde "run-dag" al is ververst. De run-dag is
+(DataUpdatedAt + 2 uur).date() - UTC+2, zodat de 3 runs van een NL-dag
+(01:00/09:00/17:00) bij elkaar horen, ook in de winter als de cron een uur
+opschuift. Zo ververst geen enkele game 2x op een dag en gaat de tijd naar
+games die nog niet aan bod kwamen. Uitzetten: --ignore-same-day.
+
 Anders dan fetch_games_initial wordt er dus NIET geskipt op bekende appids,
 niet gededuped en niet geblacklist: elke run telt. Geen API key nodig (dit
 script haalt alleen de (keyless) store-, spelersaantal- en review-data op
@@ -127,6 +159,17 @@ Gebruik:
                                                   # meest populair, dan minst
                                                   # populair, dan willekeurig
                                                   # (~90 min per fase)
+    python fetch_new_game_info.py --mode popular --max-duration-minutes 270
+                                                  # resterende tijd naar de MEEST
+                                                  # populaire games (01:00 NL-run)
+    python fetch_new_game_info.py --mode least-popular --max-duration-minutes 270
+                                                  # resterende tijd naar de MINST
+                                                  # populaire games, minst vaak
+                                                  # ververst eerst (09:00 NL-run)
+    python fetch_new_game_info.py --mode random --max-duration-minutes 270
+                                                  # resterende tijd naar willekeurige
+                                                  # games die vandaag nog niet zijn
+                                                  # ververst (17:00 NL-run)
     python fetch_new_game_info.py --sync-reviews  # basis (games.jsonl) bijwerken met de
                                                   # laatst bekende reviews en stoppen
 """
@@ -142,7 +185,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # Bestandsrotatie: datasets groeien door in delen van max ~90 MB
 # (games.jsonl, games_extra_info.jsonl, ...). Al het lezen gaat via
@@ -170,6 +213,26 @@ DEFAULT_MAX_REQUESTS = 10000
 # run keihard zou afkappen.
 GRACEFUL_STOP_MARGIN_MINUTES = 5
 
+# De 3 geplande runs (01:00 / 09:00 / 17:00 NL-tijd) horen bij DEZELFDE
+# kalenderdag, maar DataUpdatedAt staat in UTC (01:00 NL = 23:00 UTC van de
+# dag ervoor). Deze verschuiving (UTC+2) groepeert 23:00/07:00/15:00 UTC
+# netjes op één dag - ook in de winter, want de cron schuift dan 1 uur mee.
+# De "run-dag" is dus (DataUpdatedAt in UTC + 2 uur).date().
+RUN_DAY_OFFSET = timedelta(hours=2)
+
+# --mode least-popular: de "onderste" set games = games met een GEMIDDELD
+# spelersaantal onder deze grens (gemiddelde uit games.csv + alle
+# games_extra_info.csv-regels van de game). Binnen die set krijgen games die
+# het MINST VAAK zijn ververst voorrang (zie de docstring).
+LEAST_POPULAR_MAX_AVG = 100
+
+# Labels per --mode (voor de meldingen).
+MODE_LABELS = {
+    "popular": "meest populair",
+    "least-popular": "minst populair",
+    "random": "willekeurig",
+}
+
 stop_requested = False
 
 # Review-velden: staan in games_extra_info.jsonl als momentopname, en in
@@ -189,6 +252,28 @@ def now_iso():
     UTC: lokale runs en de GitHub Action (die in UTC draait) krijgen zo
     dezelfde tijdsbasis voor DataUpdatedAt."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def parse_updated_at(value):
+    """DataUpdatedAt ('2026-09-05T18:34:12+00:00') -> aware datetime, of
+    None als het veld ontbreekt/onparseerbaar is. Een tijdstip ZONDER
+    zone-info wordt als UTC gelezen (dit script schrijft altijd UTC)."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def run_day_key(dt):
+    """Dag-sleutel ('run-dag') van een aware tijdstip: UTC + RUN_DAY_OFFSET.
+    Zo horen de 3 runs van één NL-dag (01:00/09:00/17:00) bij dezelfde dag,
+    ook al staat DataUpdatedAt in UTC en schuift de cron in de winter op."""
+    return (dt.astimezone(timezone.utc) + RUN_DAY_OFFSET).date()
 
 
 # --------------------------------------------------------------------------- #
@@ -493,12 +578,15 @@ def load_master(path):
 def load_extra_info(path):
     """Lees games_extra_info*.jsonl (alle delen samengevoegd, in
     volgorde). Retourneert (counts, last_players, avg_players,
-    latest_reviews): per appid het aantal regels, het laatste bekende
-    spelersaantal, het GEMIDDELDE spelersaantal (over alle regels van die
-    game met een int-waarde; voor --player-limit) én de
-    review-samenvatting van de LAATSTE regel over alle delen heen (die
-    wint - om games.jsonl bij te werken met de laatst bekende data)."""
-    counts, last_players, latest_reviews = {}, {}, {}
+    latest_reviews, last_updated, player_stats): per appid het aantal
+    regels, het laatste bekende spelersaantal, het GEMIDDELDE
+    spelersaantal (over alle regels van die game met een int-waarde; voor
+    --player-limit), de review-samenvatting van de LAATSTE regel over alle
+    delen heen (die wint - om games.jsonl bij te werken met de laatst
+    bekende data), het tijdstip (DataUpdatedAt) van de laatste regel (voor
+    de 'max. 1x per dag'-regel) en de ruwe spelersstatistiek (som, aantal)
+    voor het gemiddelde van --mode least-popular."""
+    counts, last_players, latest_reviews, last_updated = {}, {}, {}, {}
     player_sums, player_samples = {}, {}
     for line in iter_lines(path):
         line = line.strip()
@@ -517,11 +605,17 @@ def load_extra_info(path):
             player_samples[aid] = player_samples.get(aid, 0) + 1
         if any(r.get(k) is not None for k in REVIEW_KEYS):
             latest_reviews[aid] = {k: r.get(k) for k in REVIEW_KEYS}
+        upd = parse_updated_at(r.get("DataUpdatedAt"))
+        if upd is not None:
+            last_updated[aid] = upd     # laatste regel over alle delen wint
     # Gemiddelde over de regels met een int-waarde; regels met null (geen
     # publieke data) tellen niet mee (null is onbekend, geen 0).
     avg_players = {aid: player_sums[aid] / player_samples[aid]
                    for aid in player_samples}
-    return counts, last_players, avg_players, latest_reviews
+    player_stats = {aid: (player_sums[aid], player_samples[aid])
+                    for aid in player_samples}
+    return (counts, last_players, avg_players, latest_reviews, last_updated,
+            player_stats)
 
 
 def apply_latest_reviews(master, latest_reviews):
@@ -613,6 +707,27 @@ def main(argv=None):
                         "filter zou bijna de hele catalogus selecteren. "
                         "Combineerbaar met --player-limit, --genre_*, "
                         "--limit en --random")
+    p.add_argument("--mode", choices=sorted(MODE_LABELS), default="popular",
+                   help="welke games de RESTERENDE TIJD krijgen (bedoeld "
+                        "voor de 3 geplande GitHub-runs, elk met een eigen "
+                        "modus): 'popular' = de MEEST populaire games "
+                        "(meeste spelers eerst; standaard); 'least-popular' "
+                        "= de MINST populaire games - de set met een "
+                        "gemiddeld spelersaantal onder --least-max-avg, "
+                        "waarbij de minst vaak ververste games voorrang "
+                        "krijgen; 'random' = compleet willekeurig")
+    p.add_argument("--least-max-avg", type=float,
+                   default=LEAST_POPULAR_MAX_AVG,
+                   help=f"grens voor --mode least-popular: alleen games met "
+                        f"een GEMIDDELD spelersaantal onder deze waarde "
+                        f"(gemiddelde uit games.csv + alle "
+                        f"games_extra_info.csv-regels; default: "
+                        f"{LEAST_POPULAR_MAX_AVG})")
+    p.add_argument("--ignore-same-day", action="store_true",
+                   help="zet de 'max. 1x per dag'-regel UIT. Standaard wordt "
+                        "een game die op DEZELFDE run-dag (UTC+2, dus de 3 "
+                        "runs 01:00/09:00/17:00 NL) al is ververst "
+                        "overgeslagen, op basis van DataUpdatedAt")
     p.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                    help=f"seconden rust tussen twee requests "
                         f"(default: {DEFAULT_DELAY})")
@@ -669,8 +784,8 @@ def main(argv=None):
         print(f"! Geen games gevonden in {master_path}. Draai eerst "
               "fetch_games_initial.py om de masterlijst op te bouwen.")
         sys.exit(1)
-    extra_counts, extra_last, avg_players, latest_reviews = \
-        load_extra_info(extra_path)
+    (extra_counts, extra_last, avg_players, latest_reviews, extra_updated,
+     player_stats) = load_extra_info(extra_path)
     us_blocked = load_us_region_blocked(data_dir)
 
     # --sync-reviews: de basis (games.jsonl, 1 record per game) bijwerken
@@ -699,8 +814,64 @@ def main(argv=None):
             val = master[aid].get("last_seen_player_count")
         return val if isinstance(val, int) else -1
 
-    ordered_ids = sorted(master,
-                         key=lambda a: (-order_score(a), a))
+    # ---- Modus: welke games krijgen de resterende tijd? ---------------- #
+    # Elke geplande run doet iets anders (zie de docstring):
+    #   popular       - de MEEST populaire games (meeste spelers eerst);
+    #   least-popular - de MINST populaire games (gemiddeld < N spelers),
+    #                   met de minst vaak ververste games uit die set eerst;
+    #   random        - compleet willekeurig.
+    mode = args.mode
+    if args.random:
+        mode = "random"          # losse vlag blijft werken als alias
+    mode_label = MODE_LABELS.get(mode, mode)
+
+    # Gemiddeld spelersaantal van een game over ALLES wat we weten: de
+    # master-snapshot (games.csv) + al zijn games_extra_info-regels
+    # (games_extra_info.csv). Games zonder spelerswaarde -> None (onbekend).
+    def avg_players_incl_master(aid):
+        s, n = player_stats.get(aid, (0, 0))
+        mv = master[aid].get("last_seen_player_count")
+        if isinstance(mv, int):
+            s += mv
+            n += 1
+        return (s / n) if n else None
+
+    def is_least_popular(aid):
+        val = avg_players_incl_master(aid)
+        return val is not None and val < args.least_max_avg
+
+    least_total = None
+    if mode == "least-popular":
+        # De "onderste" set: games met gemiddeld minder dan --least-max-avg
+        # spelers. Binnen die set eerst de games die het MINST VAAK zijn
+        # ververst (aantal games_extra_info-regels), daarna de laagste
+        # spelersaantallen: zo komen alle lage games aan de beurt i.p.v.
+        # telkens dezelfde niet-populaire games.
+        least_ids = [aid for aid in master if is_least_popular(aid)]
+        least_total = len(least_ids)
+        least_ids.sort(key=lambda a: (extra_counts.get(a, 0),
+                                      avg_players_incl_master(a), a))
+        ordered_ids = least_ids
+    elif mode == "random":
+        ordered_ids = list(master)
+        random.shuffle(ordered_ids)
+    else:
+        ordered_ids = sorted(master,
+                             key=lambda a: (-order_score(a), a))
+
+    # ---- Max. 1x per dag ------------------------------------------------- #
+    # DataUpdatedAt (UTC) wordt vergeleken op "run-dag" (UTC + 2 uur): de 3
+    # runs van één NL-dag (01:00/09:00/17:00) horen zo bij elkaar. Een game
+    # die vandaag al is ververst wordt overgeslagen, zodat de tijd naar games
+    # gaat die nog niet aan bod kwamen. Uitzetten: --ignore-same-day.
+    run_day = run_day_key(datetime.now(timezone.utc))
+    skipped_same_day = 0
+    if not args.ignore_same_day:
+        same_day_ids = {aid for aid, upd in extra_updated.items()
+                        if run_day_key(upd) == run_day}
+        before_same_day = len(ordered_ids)
+        ordered_ids = [aid for aid in ordered_ids if aid not in same_day_ids]
+        skipped_same_day = before_same_day - len(ordered_ids)
 
     # Selectiefilters. Alles combineert met EN; meerdere --genre_*-vlaggen
     # zijn OF binnen de genres. Beschikbare filters:
@@ -762,16 +933,12 @@ def main(argv=None):
                      if any(genre_key(g) == _key
                             for g in rec.get("genres") or []))))
 
-    # Volgorde: zonder --random meeste spelers eerst (uit ordered_ids), met
-    # --player-limit minste spelers eerst (oplopend op gemiddelde: met
-    # --limit pakt de run dan altijd de laagste games als eerste), met
-    # --random willekeurig gemixt (uniforme steekproef: zo blijven niet
-    # steeds dezelfde top-games vooraan staan en wordt ook iets op plek
-    # 50.000 regelmatig bijgewerkt).
-    if args.player_limit is not None:
+    # --mode least-popular en --mode random hebben hun eigen volgorde al
+    # bepaald; die niet overschrijven. Bij de andere modi sorteert
+    # --player-limit op minste spelers eerst (met --limit pakt de run dan
+    # altijd de laagste games als eerste).
+    if args.player_limit is not None and mode != "least-popular":
         selected_ids.sort(key=lambda a: (reference_players(a), a))
-    if args.random:
-        random.shuffle(selected_ids)
 
     print("\n=== SteamDataOfficial: extra info per game ===")
     print(f"Games in de master          : {len(master)}")
@@ -779,16 +946,23 @@ def main(argv=None):
     print(f"Al in games_extra_info*.jsonl ({n_parts} deel"
           + ("en" if n_parts != 1 else "") + "): "
           f"{sum(extra_counts.values())} regels")
-    if args.random:
-        print("Volgorde                    : willekeurig (--random)")
-    elif args.top_bottom_random:
-        print("Volgorde                    : 3 fasen (--top_bottom_random): "
+    if args.top_bottom_random:
+        print("Modus                       : 3 fasen (--top_bottom_random): "
               "meest populair -> minst populair -> willekeurig")
-    elif args.player_limit is not None:
+    else:
+        print(f"Modus                       : {mode_label} (--mode {mode})")
+    if args.player_limit is not None and mode != "least-popular":
         print("Volgorde                    : minste spelers eerst "
               "(--player-limit)")
+    if args.ignore_same_day:
+        print("Max. 1x per dag             : UIT (--ignore-same-day)")
     else:
-        print("Volgorde                    : meeste spelers eerst")
+        print(f"Max. 1x per dag             : aan - {skipped_same_day} games "
+              f"vandaag al ververst en overgeslagen (run-dag {run_day}).")
+    if mode == "least-popular" and not args.top_bottom_random:
+        print(f"> --mode least-popular: {least_total} games met een gemiddeld "
+              f"spelersaantal < {args.least_max_avg}; de minst vaak "
+              "ververste games eerst.")
     if args.player_limit is not None:
         print(f"> --player-limit {args.player_limit}: alleen games met een "
               f"gemiddeld spelersaantal < {args.player_limit} worden "

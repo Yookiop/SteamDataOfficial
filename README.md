@@ -136,9 +136,19 @@ python fetch_new_game_info.py --is_free_true # alleen GRATIS games pollen
 python fetch_new_game_info.py --genre_sports # alleen games met genre Sports pollen
 python fetch_new_game_info.py --player-limit 50   # alleen games met gemiddeld
                                                   # < 50 spelers pollen
+python fetch_new_game_info.py --mode popular --max-duration-minutes 270
+                                             # resterende tijd naar de MEEST
+                                             # populaire games (01:00 NL-run)
+python fetch_new_game_info.py --mode least-popular --max-duration-minutes 270
+                                             # resterende tijd naar de MINST
+                                             # populaire games: minst vaak
+                                             # ververst eerst (09:00 NL-run)
+python fetch_new_game_info.py --mode random --max-duration-minutes 270
+                                             # resterende tijd naar willekeurige
+                                             # games (17:00 NL-run)
 python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
-                                             # 3 gelijke tijdblokken (GitHub Action):
-                                             # ~90 min meest populair,
+                                             # (oude modus) 3 gelijke tijdblokken
+                                             # in één run: ~90 min meest populair,
                                              # ~90 min minst populair,
                                              # ~90 min willekeurig
 ```
@@ -188,32 +198,81 @@ geweest, wordt in fase 2 en 3 overgeslagen. `--limit` wordt in deze modus
 **genegeerd** (de tijd bepaalt de selectie); de filters hierboven
 (`--is_free_true`, `--genre_*`, `--player-limit`) blijven gewoon werken.
 
-### 3) GitHub Actions (optioneel): de `RUN_STATUS`-marker
+**Per run een eigen taak (GitHub Action): `--mode`** — sinds 2026-09-13
+draait elke geplande run **één** selectie met het volledige tijdsbudget. Elk
+van de 3 runs per dag krijgt zo zijn eigen taak:
+
+- `--mode popular` (01:00 NL) — de **meest populaire** games: aflopend op het
+  laatste bekende spelersaantal per game (de nieuwste `games_extra_info`-regel,
+  dus `appid_<hoogste nummer>` / nieuwste `DataUpdatedAt`; staat het daar niet
+  in, dan valt het terug op `games.csv`). Dit is ook de standaardmodus.
+- `--mode least-popular` (09:00 NL) — de **minst populaire** games. Eerst wordt
+  de "onderste" set bepaald: games met een **gemiddeld** spelersaantal onder
+  `--least-max-avg` (default **100**), waarbij het gemiddelde wordt berekend uit
+  de master-snapshot (`games.csv`) **+** alle `games_extra_info`-regels van die
+  game (`games_extra_info.csv`). Binnen die set komen de games die het **minst
+  vaak zijn ververst** eerst (het aantal keren dat de appid in
+  `games_extra_info` staat), daarna de laagste spelersaantallen. Zo krijgt elke
+  lage game een beurt i.p.v. dat telkens dezelfde niet-populaire games worden
+  ververst. Games zonder enkele spelerswaarde vallen buiten de set ('onbekend'
+  is niet hetzelfde als 'weinig spelers'). De grens is aanpasbaar met
+  `--least-max-avg <N>`.
+- `--mode random` (17:00 NL) — **willekeurige** games die die dag nog niet aan
+  bod kwamen.
+
+```bash
+python fetch_new_game_info.py --mode popular --max-duration-minutes 270
+python fetch_new_game_info.py --mode least-popular --max-duration-minutes 270
+python fetch_new_game_info.py --mode random --max-duration-minutes 270
+```
+
+**Maximaal 1× per dag** — in **alle** modi (ook `--top_bottom_random`) wordt
+een game **overgeslagen die op dezelfde "run-dag" al is ververst**. Dat wordt
+bepaald uit de kolom `DataUpdatedAt`: de run-dag is
+`(DataUpdatedAt in UTC + 2 uur).date()`. Die `+2 uur` (`UTC+2`) zorgt dat de 3
+runs van één NL-dag (01:00/09:00/17:00) bij elkaar horen — ook in de winter,
+als de cron een uur opschuift. Zo ververst geen enkele game 2× op een dag en
+gaat de tijd naar games die nog niet aan bod kwamen. Uitzetten kan met
+`--ignore-same-day` (bv. voor een handmatige extra run).
+
+### 3) GitHub Actions (optioneel)
 
 `.github/workflows/nightly_fetch.yml` doet hetzelfde automatisch op GitHub,
-in **één job met twee stappen** en een **dynamisch tijdsbudget** (niets
-hardcoded):
+in **één job** met een **dynamisch tijdsbudget** (niets hardcoded):
 
 > **Schema (sinds 2026-09-12):** de workflow draait **automatisch 3× per
 > dag** — 01:00, 09:00 en 17:00 NL-tijd. GitHub cron werkt in **UTC** en kent
 > geen zomertijd (in de winter schuift alles 1 uur op), en het schema werkt
 > alleen als dit bestand op de **default branch (main)** staat. Handmatig
 > starten blijft mogelijk: Actions → *Nightly fetch new game info* → *Run
-> workflow*. De repo is public, dus Actions-minuten zijn gratis; de runs
+> workflow* (met de input `mode` kies je dan zelf `popular`, `least-popular`
+> of `random`). De repo is public, dus Actions-minuten zijn gratis; de runs
 > zitten 8 uur uit elkaar en duren max ~5,5 uur, dus ze overlappen elkaar
 > nooit.
 
-1. **bulk** — `fetch_games_initial.py`, budget `RUN_BUDGET_MIN` (330 min),
-   checkpoint-commit elke 5 minuten. Zodra de catalogus compleet is print
-   het script `Successfully processed all initial games` (+
-   `RUN_STATUS=complete`) en is de stap binnen een paar minuten klaar.
-2. **extra info** — `fetch_new_game_info.py --top_bottom_random` met een
-   budget dat de stap **zelf berekent**: `RUN_BUDGET_MIN −
-   RUN_SHUTDOWN_MIN − (tijd die de bulk gebruikte)`. Dat budget wordt in 3
-   gelijke fasen verdeeld (meest populair → minst populair → willekeurig),
-   óók met een checkpoint-commit elke 5 minuten. Draait **alleen** als
-   stap 1 de catalogus écht compleet had; is er te weinig tijd over (< 5
-   min), dan wordt de stap overgeslagen en pakt de volgende run het op.
+Elke run doet hetzelfde voorwerk en daarna zijn eigen taak:
+
+0. **CSV-tabellen** — `jsonl_to_table.py` ververst `games.csv`,
+   `game_genres/categories/publishers.csv`, `games_extra_info.csv` en
+   `date.csv` uit de actuele jsonl-bestanden.
+1. **nieuwe games** — `fetch_games_initial.py` haalt alle nog onbekende
+   appids op, met een budget van `RUN_BUDGET_MIN − RUN_SHUTDOWN_MIN −
+   (al gebruikt) − MAIN_MIN_MIN`; elke 5 minuten een checkpoint-commit.
+2. **eigen taak** — `fetch_new_game_info.py --mode <...>` met **alle
+   resterende tijd** (min `TABLE_MIN` reserve voor de slot-CSV's): `popular`
+   (23:00 UTC / 01:00 NL), `least-popular` (07:00 UTC / 09:00 NL) of `random`
+   (15:00 UTC / 17:00 NL). Welke modus het is leidt de workflow af uit het
+   UTC-uur; een handmatige run kan het met de input `mode` overschrijven. Elke
+   5 minuten een checkpoint-commit.
+3. **slot** — de data wordt gecommit + gepusht. De jsonl/json-bestanden gaan
+   **elke run** mee; de **CSV's alleen op zondag** (run-dag, UTC+2): alleen
+   dan draait `jsonl_to_table.py` hier nóg een keer op de nieuwe jsonl-data en
+   gaat heel `data/` mee. Ze zijn samen ~50 MB en zouden de git-historie
+   anders met ~150 MB per dag laten groeien. Deze stap draait ook als een
+   eerdere stap is misgegaan (`if: always()`).
+
+In **alle** runs geldt de **max. 1× per dag**-regel: een game die op dezelfde
+run-dag al is ververst wordt overgeslagen (zie `--mode` hierboven).
 
 Het budget staat bovenin de workflow:
 
@@ -221,6 +280,8 @@ Het budget staat bovenin de workflow:
 env:
   RUN_BUDGET_MIN: "330"     # totale wall-clock budget van de hele run
   RUN_SHUTDOWN_MIN: "5"     # laatste minuten: alleen afronden (geen scriptwerk)
+  MAIN_MIN_MIN: "20"        # minimaal gereserveerd voor stap 2 (de modus-taak)
+  TABLE_MIN: "10"           # reserve voor de slot-jsonl_to_table (de CSV's)
 ```
 
 Beide scripts stoppen **5 minuten vóór hun eigen budget** (netjes afgerond:
@@ -230,13 +291,14 @@ een regel afgebroken, ook al zit de run tegen de 330 minuten aan (GitHub
 kapt een job hard af bij 360). Door de 5-minuten-checkpoints verlies je bij
 een onverwachte afbreking hooguit ~5 minuten werk.
 
-Rekenvoorbeelden: bulk 5 min → extra krijgt ~325 min (3 fasen van ~108 min);
-bulk 60 min → ~270 min (3 × ~90); bulk 300 min → ~30 min (3 × ~10); bulk
-≥ 325 min → extra overgeslagen.
+Rekenvoorbeelden: kost stap 1 maar 5 min → de eigen taak krijgt ~305 min;
+kost stap 1 60 min → ~250 min; gebruikt stap 1 bijna het hele budget, dan
+houdt de modus-taak nog altijd `MAIN_MIN_MIN` (20 min) over — en de volgende
+run pakt de rest op.
 
-Als allerlaatste regel print `fetch_games_initial.py` daarom de status
-`RUN_STATUS=...` (bij 'complete' voorafgegaan door de leesbare regel
-`Successfully processed all initial games`):
+`fetch_games_initial.py` print als laatste regel de status `RUN_STATUS=...`
+(bij 'complete' voorafgegaan door de leesbare regel `Successfully processed
+all initial games`):
 
 - `RUN_STATUS=complete` — alle 'nieuwe' appids van deze run zijn verwerkt
   (basis in sync met de API-lijst van dit moment; óók als er niets nieuws
@@ -244,13 +306,12 @@ Als allerlaatste regel print `fetch_games_initial.py` daarom de status
 - `RUN_STATUS=partial` — netjes vroegtijdig gestopt (duurbudget, `--limit`,
   Ctrl+C); er zijn nog 'nieuwe' appids over.
 
-De workflow leest die regels uit de log (`Successfully processed all
-initial games` of `RUN_STATUS=complete`): alleen dán draait daarna de
-extra-info-stap; bij `partial` doet de job alleen de eindcommit en pakt de
-volgende run de rest op. De status wordt **elke run opnieuw** bepaald op
-basis van wat er nog 'nieuw' is — er wordt niets opgeslagen. Komen er later
-nieuwe games bij via de API, dan is de run waarin ze allemaal verwerkt zijn
-vanzelf weer `complete`.
+De status wordt **elke run opnieuw** bepaald op basis van wat er nog 'nieuw'
+is — er wordt niets opgeslagen. Komen er later nieuwe games bij via de API,
+dan is de run waarin ze allemaal verwerkt zijn vanzelf weer `complete`. De
+status is nu alleen nog **informatie voor de log**: de modus-taak draait
+immers **altijd** (zolang er tijd over is), ook als de catalogus nog niet
+compleet is.
 
 ## Output (in `data/`)
 
@@ -274,7 +335,8 @@ encoded buiten de repo (zie "Eerste doorgang" hierboven).
 > `game_genres.csv`, `game_categories.csv`, `game_publishers.csv`,
 > `date.csv` en `games_extra_info.csv` worden door `jsonl_to_table.py`
 > **elke run volledig overschreven** op basis van de actuele jsonl-
-> bestanden. Je hoeft ze dus nooit zelf te legen — ook niet na een
+> bestanden. In de GitHub Action worden ze **alleen op zondag meegecommit**
+> (de jsonl/json-bestanden élke run) — zie stap 3 hierboven. Je hoeft ze dus nooit zelf te legen — ook niet na een
 > `--reset` of het leeggooien van de json-data: een verse
 > `jsonl_to_table.py`-run regenereert alles opnieuw (bij een lege
 > `games.jsonl` krijg je `games.csv` met alleen de header, die weer

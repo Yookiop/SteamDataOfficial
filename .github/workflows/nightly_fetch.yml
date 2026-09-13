@@ -1,38 +1,56 @@
-# Steam data run: bulk catalog + extra info
+# Steam data run: CSV-tabellen + nieuwe games + extra info (3x per dag,
+# ELKE run een EIGEN taak)
 #
-#  1. fetch_games_initial.py (no --limit): process every still-unknown appid
-#     from the official app list. The script gets a 330-min time budget and
-#     stops ITSELF ~5 min before that (--max-duration-minutes), rounding off
-#     cleanly (exit 0) instead of being hard-killed. The step timeout of
-#     330 min + continue-on-error is only a safety net. During the run a
-#     checkpoint is committed + pushed EVERY 5 MINUTES, so at most ~5 min of
-#     work is in the final commit; the next manual trigger picks up where it
-#     left off. When the catalog is complete the script prints
-#     'Successfully processed all initial games' (+ RUN_STATUS=complete) and
-#     the step finishes in a few minutes; only then does step 2 run.
-#  2. fetch_new_game_info.py --top_bottom_random: extra snapshots + reviews in
-#     3 EQUAL time blocks (most popular -> least popular -> random, each a
-#     third of the remaining time):
-#       1) the MOST popular games,
-#       2) the LEAST popular games (games without a player count come last:
-#          'unknown' is not the same as 'few players'),
-#       3) completely random.
-#     Each game is refreshed at most once per run. A checkpoint is committed
-#     + pushed every 5 minutes, exactly like step 1. Only runs when step 1
-#     really completed the whole catalog (bulk output complete=true).
+# Elke geplande run doet exact hetzelfde voorwerk en daarna een eigen taak:
 #
-# Time budget (DYNAMIC, nothing hardcoded): this is ONE job and GitHub kills
-# a job after 6 hours (360 min), so the run budgets ITSELF. RUN_BUDGET_MIN
-# (=330, see the env block below) is the wall-clock budget for the whole run;
-# RUN_SHUTDOWN_MIN (=5) is the shutdown window at the end. Both scripts stop
-# themselves 5 min before their own budget (--max-duration-minutes) so they
-# can round off cleanly (files closed, master written) and the commit + push
-# happens after that - nothing is ever killed mid-record. Step 1 gets the
-# full budget, step 2 gets whatever is LEFT (computed in the step itself): on
-# a normal day (few new games) that is nearly the whole budget, on a day with
-# many new games little or nothing - then the next run picks the extra info
-# up again. Thanks to the 5-min checkpoints even a hard job-timeout loses at
-# most ~5 min of work.
+#  STAP 0  jsonl_to_table.py - de CSV-tabellen (games.csv,
+#          game_genres/categories/publishers.csv, games_extra_info.csv,
+#          date.csv) volledig verversen uit de actuele jsonl-bestanden.
+#  STAP 1  fetch_games_initial.py (geen --limit): alle nog onbekende appids
+#          uit de officiele app-lijst ophalen. Het script krijgt een
+#          dynamisch budget (het hele run-budget min de afrondmarge en min
+#          wat voor de eigen taak is gereserveerd) en stopt ZELF ~5 min voor
+#          die grens (--max-duration-minutes), netjes afgerond (exit 0)
+#          i.p.v. hard afgekapt. Tijdens de run wordt ELKE 5 MINUTEN een
+#          checkpoint gecommit + gepusht, dus er kan hooguit ~5 min werk
+#          verloren gaan. De volgende run gaat verder waar deze stopte.
+#  STAP 2  fetch_new_game_info.py --mode <...>: ALLE resterende tijd van het
+#          run-budget naar een selectie die per run verschilt:
+#            - 23:00 UTC (01:00 NL) -> --mode popular: de MEEST populaire
+#              games (nieuwste spelersaantal per appid uit
+#              games_extra_info, anders games.csv);
+#            - 07:00 UTC (09:00 NL) -> --mode least-popular: de MINST
+#              populaire games (set met gemiddeld < 100 spelers; het
+#              gemiddelde komt uit games.csv + games_extra_info.csv),
+#              waarbij de minst vaak ververste games uit die set voorrang
+#              krijgen;
+#            - 15:00 UTC (17:00 NL) -> --mode random: willekeurige games.
+#          Checkpoint-commit + push elke 5 minuten, precies als stap 1.
+#
+# MAX. 1x PER DAG: in ALLE runs wordt een game overgeslagen die op dezelfde
+# "run-dag" al is ververst (kolom DataUpdatedAt; run-dag = UTC+2, zodat de 3
+# runs van een NL-dag bij elkaar horen - ook in de winter). Zo wordt geen
+# enkele game 2x op een dag ververst en gaat de tijd naar games die nog niet
+# aan bod kwamen.
+#
+# CSV's ALLEEN OP ZONDAG: de jsonl/json-bestanden (de bron) worden ELKE run
+# meegecommit, maar de CSV's (~50 MB per keer) alleen wanneer de run-dag een
+# zondag is. In dat geval draait de slotstap jsonl_to_table.py nog een keer op
+# de NIEUWE data en wordt alles in data/ gecommit; op de andere dagen worden
+# alleen de jsonl/json-bestanden gecommit en blijven de CSV's zoals ze zijn.
+# Zo groeit de git-historie niet met ~150 MB per dag.
+#
+# Time budget (DYNAMIC, nothing hardcoded): dit is EEN job en GitHub kapt een
+# job na 6 uur (360 min) hard af, dus de run budgetteert zichzelf.
+# RUN_BUDGET_MIN (=330, zie env) is het wall-clock budget van de hele run;
+# RUN_SHUTDOWN_MIN (=5) is het venster waarin alleen nog wordt afgerond.
+# MAIN_MIN_MIN (=20) is het minimum dat voor stap 2 wordt gereserveerd (zodat
+# de eigen taak ook op een dag met veel nieuwe games altijd draait) en
+# TABLE_MIN (=10) is de reserve voor de slot-jsonl_to_table. Beide scripts
+# stoppen zelf 5 min voor hun eigen budget (--max-duration-minutes) en trekken
+# daarna nog wat tijd uit voor het wegschrijven; die 5 min wordt in de stap
+# zelf weer bij het scriptbudget opgeteld. Dank zij de 5-min-checkpoints
+# verliest zelfs een harde job-timeout hooguit ~5 min werk.
 #
 # Requires the GitHub secret "STEAM_API_KEY" (repo Settings > Secrets and
 # variables > Actions) with your Steam Web API key
@@ -42,20 +60,35 @@
 # `on:` section below - GitHub cron runs in UTC and ignores DST, so the times
 # shift 1 hour in the winter). You can always start an extra run by hand:
 # Actions > "Nightly fetch new game info" > Run workflow (also from your
-# phone). A run that is still busy is never cancelled - a new run waits for
-# it (concurrency group). Every run lasts up to ~5,5 hours and resumes from
-# the last checkpoint. This repo is PUBLIC, so Actions minutes are free.
+# phone) - met de input `mode` kies je dan zelf welke taak er draait. A run
+# that is still busy is never cancelled - a new run waits for it (concurrency
+# group). Every run lasts up to ~5,5 hours and resumes from the last
+# checkpoint. This repo is PUBLIC, so Actions minutes are free.
 
 name: Nightly fetch new game info
 
 on:
   workflow_dispatch: # handmatig, via de Actions-tab (kan ook vanaf je telefoon)
-  # 3x per dag: 01:00, 09:00 en 17:00 NL-tijd.
+    inputs:
+      mode:
+        description: "Welke taak na de nieuwe games? (auto = op basis van het UTC-uur)"
+        type: choice
+        options:
+          - auto
+          - popular
+          - least-popular
+          - random
+        default: auto
+  # 3x per dag: 01:00, 09:00 en 17:00 NL-tijd - ELK met een EIGEN taak.
   # ⚠️ GitHub cron draait in UTC en volgt GEEN zomertijd. Deze tijden zijn
   # gekozen voor de NL-zomertijd (CEST = UTC+2): 23:00/07:00/15:00 UTC =
   # 01:00/09:00/17:00 NL. In de winter (CET = UTC+1) schuift alles 1 uur op
-  # naar 00:00/08:00/16:00 NL. Wil je het liefst de WINTERTIJD exact, gebruik
-  # dan "0 0 * * *", "0 8 * * *" en "0 16 * * *".
+  # naar 00:00/08:00/16:00 NL; de "run-dag" (UTC+2) blijft dan hetzelfde
+  # drietal runs, dus de max-1x-per-dag-regel klopt in beide seizoenen.
+  # Welke taak er draait wordt in de eerste stap uit het UTC-uur afgeleid:
+  #   23:00 UTC -> popular        (01:00 NL)
+  #   07:00 UTC -> least-popular  (09:00 NL)
+  #   15:00 UTC -> random         (17:00 NL)
   # Let op:
   #  - Een schedule draait alleen als dít bestand op de DEFAULT branch (main)
   #    staat, niet op een feature branch.
@@ -64,9 +97,9 @@ on:
   #  - De drie runs zitten 8 uur uit elkaar; een run duurt max ~5,5 uur, dus
   #    ze overlappen elkaar niet.
   schedule:
-    - cron: "0 23 * * *" # 01:00 NL (zomertijd)
-    - cron: "0 7 * * *"  # 09:00 NL (zomertijd)
-    - cron: "0 15 * * *" # 17:00 NL (zomertijd)
+    - cron: "0 23 * * *" # 01:00 NL -> meest populaire games
+    - cron: "0 7 * * *"  # 09:00 NL -> minst populaire games
+    - cron: "0 15 * * *" # 17:00 NL -> willekeurige games
 
 permissions:
   contents: write # needed to push the data back
@@ -75,14 +108,21 @@ permissions:
 # 360 min hard af, dus de run plant zichzelf ruim daaronder:
 #   RUN_BUDGET_MIN   = totale budget van de run in minuten
 #   RUN_SHUTDOWN_MIN = laatste minuten die alleen voor afronden zijn
+#   MAIN_MIN_MIN     = minimum dat voor de modus-taak (stap 2) wordt
+#                      gereserveerd, ook als stap 1 het budget bijna
+#                      opsoupeert: zo draait elke run echt zijn eigen taak
+#   TABLE_MIN        = reserve voor de slot-jsonl_to_table (de CSV's van de
+#                      nieuwe data; alleen op zondag)
 # Beide scripts stoppen zelf al 5 min vóór hun eigen budget
 # (--max-duration-minutes, GRACEFUL_STOP_MARGIN_MINUTES) en trekken daarna
 # nog ~1-3 min uit voor het wegschrijven (master/CSV's); daarom komt die 5
-# min er in de extra-info-stap weer bij op. Zo wordt er nooit midden in een
-# regel afgebroken.
+# min in de stap zelf weer bij het scriptbudget op. Zo wordt er nooit midden
+# in een regel afgebroken.
 env:
   RUN_BUDGET_MIN: "330"
   RUN_SHUTDOWN_MIN: "5"
+  MAIN_MIN_MIN: "20"
+  TABLE_MIN: "10"
 
 # Never run two runs at the same time; a running run is not cancelled, a
 # new one waits.
@@ -93,12 +133,13 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 355 # Hard cap of a GitHub-hosted job is 360 min. So
-                         # bulk (330) + extra (280) do NOT both fit fully:
-                         # step 2 gets the time that is LEFT after step 1
-                         # (normally plenty - up to its full 4,5 uur). The
-                         # 5-min checkpoints in both steps mean a hard job
-                         # timeout loses at most ~5 min of work.
+    timeout-minutes: 355 # Hard cap of a GitHub-hosted job is 360 min. Stap 1
+                         # krijgt RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN -
+                         # MAIN_MIN_MIN minuten; stap 2 krijgt de tijd die
+                         # daarna OVER is (min TABLE_MIN reserve voor de
+                         # slot-CSV's). De 5-min-checkpoints in beide stappen
+                         # betekenen dat een harde job-timeout hooguit ~5 min
+                         # werk kost.
     # API key as job-level env var: the `secrets` context is NOT allowed in
     # an `if:` condition (GitHub error "Unrecognized named-value:
     # 'secrets'"), but it IS allowed in `env`. env.STEAM_API_KEY makes the
@@ -115,14 +156,70 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Fetch new games via the keyed Web API (needs the API key). The
-      # script gets a 330-min time budget (--max-duration-minutes) and stops
-      # itself ~5 min before that, rounding off cleanly; the step timeout of
-      # 330 min + continue-on-error is only a safety net. A checkpoint is
-      # committed + pushed every 5 minutes. Live progress is in the Actions
-      # log (heartbeat + log lines).
+      # Welke taak doet DEZE run? De 3 crons zijn in de workflow-context niet
+      # van elkaar te onderscheiden, dus leiden we de modus af uit het
+      # UTC-uur (23 -> popular, 7 -> least-popular, 15 -> random). Een
+      # handmatige run kan de modus met de input `mode` zelf kiezen; `auto`
+      # valt terug op het UTC-uur.
+      - id: mode
+        name: Bepaal de taak van deze run (popular / least-popular / random)
+        shell: bash
+        run: |
+          set -euo pipefail
+          requested="${{ github.event.inputs.mode }}"
+          hour=$(date -u +%H)
+          hour=$((10#$hour))
+          if [ -n "$requested" ] && [ "$requested" != "auto" ]; then
+            mode="$requested"
+            echo "> handmatige keuze: modus = $mode"
+          else
+            case "$hour" in
+              23) mode="popular" ;;        # 01:00 NL
+              7)  mode="least-popular" ;;  # 09:00 NL
+              15) mode="random" ;;         # 17:00 NL
+              *)  mode="popular" ;;        # handmatig op een ander uur
+            esac
+            echo "> UTC-uur $hour -> modus = $mode"
+          fi
+          # De "run-dag" (UTC+2): de 3 runs van een NL-dag horen bij elkaar.
+          run_day="$(date -u -d '+2 hours' +%Y-%m-%d)"
+          # CSV's worden ALLEEN op zondag meegecommit (~50 MB per keer; op de
+          # andere dagen zou dat de git-historie met ~150 MB per dag laten
+          # groeien). De jsonl/json-bestanden gaan altijd mee.
+          if [ "$(date -u -d '+2 hours' +%u)" = "7" ]; then
+            csv_commit="true"
+          else
+            csv_commit="false"
+          fi
+          echo "> run-dag: $run_day | CSV's committen: $csv_commit (alleen op zondag)"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "run_day=$run_day" >> "$GITHUB_OUTPUT"
+          echo "csv_commit=$csv_commit" >> "$GITHUB_OUTPUT"
+
+      # Stap 0: de CSV-tabellen verversen uit de jsonl-bestanden van de vorige
+      # run (games.csv, games_extra_info.csv, enz.). Er wordt hier NIETS
+      # gecommit: de CSV's gaan alleen op zondag mee (zie de slotstap). Aan het
+      # eind van de run draait dit script nog een keer, dan op de NIEUWE
+      # jsonl-data.
+      - id: tables
+        name: jsonl_to_table (start) - CSV-tabellen verversen
+        timeout-minutes: 30
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          python jsonl_to_table.py
+          echo "[$(date -u +'%H:%M:%S')] CSV-tabellen ververst (committen gebeurt alleen op zondag, in de slotstap)"
+
+      # Stap 1: nieuwe games ophalen via de keyed Web API (heeft de API key
+      # nodig). Het budget is DYNAMISCH: het hele run-budget min de
+      # afrondmarge en min MAIN_MIN_MIN (dat is gereserveerd voor stap 2,
+      # zodat elke run echt zijn eigen taak doet). Zoals altijd stopt het
+      # script zelf ~5 min voor die grens en wordt er elke 5 minuten een
+      # checkpoint gecommit + gepusht. Live progress staat in de Actions-log
+      # (heartbeat + logregels).
       - id: bulk
-        name: Fetch new games (bulk, full run budget, checkpoints every 5 min)
+        name: Nieuwe games ophalen (fetch_games_initial, dynamisch budget)
         if: ${{ env.STEAM_API_KEY != '' }}
         timeout-minutes: 335
         continue-on-error: true
@@ -132,8 +229,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # Checkpoints bevatten alleen de jsonl/json-bestanden: de CSV's zijn
+          # afgeleid en gaan alleen op zondag mee (scheelt ~50 MB per commit).
           commit_checkpoint() {
-            git add data/
+            git add data/ ':(exclude)data/*.csv'
             if git diff --cached --quiet; then
               echo "[$(date -u +'%H:%M:%S')] no changes to commit"
             else
@@ -146,8 +245,26 @@ jobs:
             fi
           }
 
-          echo "> starting fetch_games_initial.py (no --limit, budget $RUN_BUDGET_MIN min) in the background..."
-          python fetch_games_initial.py --key "$STEAM_API_KEY" --max-duration-minutes "$RUN_BUDGET_MIN" > fetch.log 2>&1 &
+          # ---- dynamisch tijdsbudget voor deze stap ---------------------- #
+          # Het hele run-budget min de afrondmarge, min MAIN_MIN_MIN dat voor
+          # stap 2 (de modus-taak) is gereserveerd. GRACE_MIN is de marge die
+          # het script zelf al van zijn budget aftrekt; die tellen we er hier
+          # weer bij op, zodat het echte werk op het bedoelde moment stopt.
+          GRACE_MIN=5
+          start_epoch=$(date -u -d "${{ github.run_started_at }}" +%s)
+          now_epoch=$(date -u +%s)
+          elapsed_min=$(( (now_epoch - start_epoch) / 60 ))
+          left_min=$(( RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN - elapsed_min ))
+          bulk_min=$(( left_min - MAIN_MIN_MIN + GRACE_MIN ))
+          echo "> run-budget ${RUN_BUDGET_MIN} min | al gebruikt ~${elapsed_min} min | nog ${left_min} min | script-budget ${bulk_min} min (${MAIN_MIN_MIN} min gereserveerd voor de modus-taak)"
+
+          if [ "$bulk_min" -le "$GRACE_MIN" ]; then
+            echo "> Te weinig tijd over voor stap 1 - overgeslagen; de modus-taak draait hierna gewoon door."
+            exit 0
+          fi
+
+          echo "> starting fetch_games_initial.py (no --limit, budget ${bulk_min} min) in the background..."
+          python fetch_games_initial.py --key "$STEAM_API_KEY" --max-duration-minutes "$bulk_min" > fetch.log 2>&1 &
           PID=$!
 
           while kill -0 "$PID" 2>/dev/null; do
@@ -161,43 +278,29 @@ jobs:
           commit_checkpoint
           echo "> fetch_games_initial.py finished (exit $status). Last lines of fetch.log:"
           tail -n 5 fetch.log
-          # 'complete' only when the script really processed everything: it
-          # then prints 'Successfully processed all initial games' (+ the
-          # machine-readable RUN_STATUS=complete). A run that stopped early
-          # on its time budget prints RUN_STATUS=partial. This gates the
-          # extra-info step below.
-          if grep -qE "Successfully processed all initial games|RUN_STATUS=complete" fetch.log; then
-            echo "complete=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "complete=false" >> "$GITHUB_OUTPUT"
-          fi
+          # De modus-taak hierna bepaalt zelf of er nog tijd genoeg is; de
+          # RUN_STATUS-regel uit het script blijft nuttige info voor de log
+          # ('complete' = catalogus helemaal bijgewerkt, 'partial' = budget op).
+          grep -E "RUN_STATUS=" fetch.log || true
           if [ "$status" -ne 0 ]; then
             echo "! fetch_games_initial.py ended with an error - see fetch.log above."
             exit "$status"
           fi
 
-      - id: extra
-        name: Extra info per game (dynamisch budget - 3 fasen top/bottom/random)
-        # Only runs when the bulk step actually completed the full catalog
-        # (output complete=true); a bulk run that stopped early on its time
-        # budget skips this, so the job just commits and ends.
+      - id: main
+        name: Modus-taak (popular / least-popular / random, dynamisch budget)
+        # Draait ALTIJD (los van het resultaat van stap 1): de modus-taak
+        # krijgt alle tijd die na stap 0 + stap 1 nog over is, min TABLE_MIN
+        # voor de slot-CSV's. De modus komt uit de eerste stap
+        # (23:00 UTC = popular, 07:00 UTC = least-popular, 15:00 UTC =
+        # random); de input `mode` van een handmatige run gaat voor.
         #
-        # DYNAMIC BUDGET (nothing hardcoded): how long this step may run is
-        # computed from the wall-clock budget of the whole run (RUN_BUDGET_MIN)
-        # minus what the bulk already used, minus the shutdown window. The
-        # script gets that as --max-duration-minutes and stops itself ~5 min
-        # before it; those 5 min are added back here (GRACE_MIN), so all work
-        # really ends at RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN on the clock. If too
-        # little time is left (< MIN_STEP_MIN) the step is skipped and the
-        # next run picks the extra info up.
-        #
-        # --top_bottom_random: 3 equal time blocks (most popular -> least
-        # popular -> random) within that budget. A checkpoint is committed +
-        # pushed every 5 minutes, so even a hard job-timeout loses at most
-        # ~5 min of work. Own timeout + continue-on-error so the commit step
-        # below always runs.
-        if: ${{ steps.bulk.outcome == 'success' && steps.bulk.outputs.complete == 'true' }}
-        timeout-minutes: 335
+        # Dynamisch budget: (run-budget - afrondmarge - al gebruikt) min
+        # TABLE_MIN; het script stopt zelf 5 min voor die grens en die marge
+        # wordt hier weer opgeteld (GRACE_MIN). Is er te weinig tijd over
+        # (< MIN_STEP_MIN), dan slaat de stap zichzelf over en pakt de
+        # volgende run het op. Zoals in stap 1 elke 5 minuten een checkpoint.
+        timeout-minutes: 340
         continue-on-error: true
         shell: bash
         run: |
@@ -205,8 +308,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # Checkpoints bevatten alleen de jsonl/json-bestanden: de CSV's zijn
+          # afgeleid en gaan alleen op zondag mee (scheelt ~50 MB per commit).
           commit_checkpoint() {
-            git add data/
+            git add data/ ':(exclude)data/*.csv'
             if git diff --cached --quiet; then
               echo "[$(date -u +'%H:%M:%S')] no changes to commit"
             else
@@ -220,22 +325,23 @@ jobs:
           }
 
           # ---- dynamisch tijdsbudget voor deze stap ---------------------- #
+          MODE="${{ steps.mode.outputs.mode }}"
           GRACE_MIN=5        # marge die het script zelf al van het budget aftrekt
           MIN_STEP_MIN=5     # minder dan dit over -> stap overslaan
           start_epoch=$(date -u -d "${{ github.run_started_at }}" +%s)
           now_epoch=$(date -u +%s)
           elapsed_min=$(( (now_epoch - start_epoch) / 60 ))
           left_min=$(( RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN - elapsed_min ))
-          script_min=$(( left_min + GRACE_MIN ))
-          echo "> run-budget ${RUN_BUDGET_MIN} min | bulk gebruikte ~${elapsed_min} min | nog ${left_min} min werk | script-budget ${script_min} min"
+          script_min=$(( left_min - TABLE_MIN + GRACE_MIN ))
+          echo "> modus: ${MODE} | run-budget ${RUN_BUDGET_MIN} min | al gebruikt ~${elapsed_min} min | nog ${left_min} min (${TABLE_MIN} min reserve voor de slot-CSV's) | script-budget ${script_min} min"
 
-          if [ "$left_min" -lt "$MIN_STEP_MIN" ]; then
-            echo "> Te weinig tijd over voor de extra-info-stap (${left_min} min < ${MIN_STEP_MIN} min) - overgeslagen; de volgende run pakt het op."
+          if [ "$script_min" -le "$MIN_STEP_MIN" ]; then
+            echo "> Te weinig tijd over voor de modus-taak (${script_min} min <= ${MIN_STEP_MIN} min) - overgeslagen; de volgende run pakt het op."
             exit 0
           fi
 
-          echo "> starting fetch_new_game_info.py --top_bottom_random --max-duration-minutes ${script_min} in the background..."
-          python fetch_new_game_info.py --top_bottom_random --max-duration-minutes "$script_min" > extra.log 2>&1 &
+          echo "> starting fetch_new_game_info.py --mode ${MODE} --max-duration-minutes ${script_min} in the background..."
+          python fetch_new_game_info.py --mode "$MODE" --max-duration-minutes "$script_min" > extra.log 2>&1 &
           PID=$!
 
           while kill -0 "$PID" 2>/dev/null; do
@@ -254,15 +360,33 @@ jobs:
             exit "$status"
           fi
 
-      - name: Commit data changes
+      # Slot: de data committen. De jsonl/json-bestanden gaan ELKE run mee; de
+      # CSV's alleen als de run-dag een zondag is (dan is de groei van de
+      # git-historie ~1/7). Alleen dan wordt jsonl_to_table.py hier nog een
+      # keer gedraaid, op de nieuwe jsonl-data. Draait ook als een eerdere
+      # stap is misgegaan (if: always()).
+      - name: Data committen (jsonl altijd, CSV's alleen op zondag)
         if: always()
+        timeout-minutes: 30
+        shell: bash
         run: |
+          set -u
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
+          CSV_COMMIT="${{ steps.mode.outputs.csv_commit }}"
+          if [ "$CSV_COMMIT" = "true" ]; then
+            echo "> run-dag is zondag: CSV-tabellen verversen en meecommitten."
+            python jsonl_to_table.py || echo "! jsonl_to_table.py eindigde met een fout - de rest van data/ wordt alsnog gecommit."
+            git add data/
+            MSG="data: Steam data run + csv tables (UTC $(date -u +'%Y-%m-%d %H:%M'))"
+          else
+            echo "> geen zondag: alleen de jsonl/json-bestanden worden gecommit (de CSV's worden op zondag ververst + gecommit)."
+            git add data/ ':(exclude)data/*.csv'
+            MSG="data: Steam data run (UTC $(date -u +'%Y-%m-%d %H:%M'))"
+          fi
           if git diff --cached --quiet; then
             echo "No changes in data/ - nothing to commit."
           else
-            git commit -m "data: Steam data run (UTC $(date -u +'%Y-%m-%d %H:%M'))"
+            git commit -m "$MSG"
             git push origin HEAD:main
           fi
