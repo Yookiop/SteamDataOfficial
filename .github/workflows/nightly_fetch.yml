@@ -11,7 +11,19 @@
 #          i.p.v. hard afgekapt. Tijdens de run wordt ELKE 5 MINUTEN een
 #          checkpoint gecommit + gepusht, dus er kan hooguit ~5 min werk
 #          verloren gaan. De volgende run gaat verder waar deze stopte.
-#  STAP 2  fetch_new_game_info.py --mode <...>: ALLE resterende tijd van het
+#  STAP 2  fetch_games_initial_update_releases.py: de games in
+#          upcoming.jsonl (nog niet uitgebracht: "Coming soon" / "Q4 2026" /
+#          "2027") opnieuw controleren. Heeft Steam nu een echte
+#          releasedatum, dan wordt de game GEPROMOVEERD naar de master
+#          (games.jsonl); anders wordt de ruwe datum + release_checked_at
+#          bijgewerkt. Keyless (draait dus ook zonder API key); krijgt
+#          maximaal RELEASES_MIN minuten per run en houdt - net als de
+#          extra-info-taak - de max-1x-per-dag-regel aan, zodat de 3 runs
+#          van een dag niet dezelfde games pakken. Binnen de kandidaten gaat
+#          de game met de OUDSTE release_checked_at eerst (eerlijke ronde):
+#          een gecontroleerde game sluit achteraan aan, dus elke game komt
+#          even vaak aan de beurt - geen random die iemand laat liggen.
+#  STAP 3  fetch_new_game_info.py --mode <...>: ALLE resterende tijd van het
 #          run-budget naar een selectie die per run verschilt:
 #            - 23:00 UTC (01:00 NL) -> --mode popular: de MEEST populaire
 #              games (nieuwste spelersaantal per appid uit
@@ -43,10 +55,11 @@
 # job na 6 uur (360 min) hard af, dus de run budgetteert zichzelf.
 # RUN_BUDGET_MIN (=330, zie env) is het wall-clock budget van de hele run;
 # RUN_SHUTDOWN_MIN (=5) is het venster waarin alleen nog wordt afgerond.
-# MAIN_MIN_MIN (=20) is het minimum dat voor stap 2 wordt gereserveerd (zodat
-# de eigen taak ook op een dag met veel nieuwe games altijd draait) en
-# COMMIT_MIN (=5) is de reserve voor de slotcommit (git add/commit/push van
-# de jsonl-bestanden). Beide scripts
+# MAIN_MIN_MIN (=20) is het minimum dat voor stap 3 (de modus-taak) wordt
+# gereserveerd (zodat de eigen taak ook op een dag met veel nieuwe games
+# altijd draait), RELEASES_MIN (=30) is het maximum dat stap 2 aan
+# releasedatums mag besteden en COMMIT_MIN (=5) is de reserve voor de
+# slotcommit (git add/commit/push van de jsonl-bestanden). Beide scripts
 # stoppen zelf 5 min voor hun eigen budget (--max-duration-minutes) en trekken
 # daarna nog wat tijd uit voor het wegschrijven; die 5 min wordt in de stap
 # zelf weer bij het scriptbudget opgeteld. Dank zij de 5-min-checkpoints
@@ -108,9 +121,11 @@ permissions:
 # 360 min hard af, dus de run plant zichzelf ruim daaronder:
 #   RUN_BUDGET_MIN   = totale budget van de run in minuten
 #   RUN_SHUTDOWN_MIN = laatste minuten die alleen voor afronden zijn
-#   MAIN_MIN_MIN     = minimum dat voor de modus-taak (stap 2) wordt
-#                      gereserveerd, ook als stap 1 het budget bijna
+#   MAIN_MIN_MIN     = minimum dat voor de modus-taak (stap 3) wordt
+#                      gereserveerd, ook als stap 1/2 het budget bijna
 #                      opsoupeert: zo draait elke run echt zijn eigen taak
+#   RELEASES_MIN     = maximum dat stap 2 (releasedatums bijwerken) per run
+#                      mag gebruiken; 0 = stap overslaan
 #   COMMIT_MIN       = reserve voor de slotcommit (git add/commit/push van de
 #                      jsonl-bestanden)
 # Beide scripts stoppen zelf al 5 min vóór hun eigen budget
@@ -122,6 +137,7 @@ env:
   RUN_BUDGET_MIN: "330"
   RUN_SHUTDOWN_MIN: "5"
   MAIN_MIN_MIN: "20"
+  RELEASES_MIN: "30"
   COMMIT_MIN: "5"
 
 # Never run two runs at the same time; a running run is not cancelled, a
@@ -221,17 +237,17 @@ jobs:
           }
 
           # ---- dynamisch tijdsbudget voor deze stap ---------------------- #
-          # Het hele run-budget min de afrondmarge, min MAIN_MIN_MIN dat voor
-          # stap 2 (de modus-taak) is gereserveerd. GRACE_MIN is de marge die
-          # het script zelf al van zijn budget aftrekt; die tellen we er hier
-          # weer bij op, zodat het echte werk op het bedoelde moment stopt.
+          # Het hele run-budget min de afrondmarge, min RELEASES_MIN (stap 2)
+          # en MAIN_MIN_MIN (stap 3). GRACE_MIN is de marge die het script zelf
+          # al van zijn budget aftrekt; die tellen we er hier weer bij op, zodat
+          # het echte werk op het bedoelde moment stopt.
           GRACE_MIN=5
           start_epoch=$(date -u -d "${{ github.run_started_at }}" +%s)
           now_epoch=$(date -u +%s)
           elapsed_min=$(( (now_epoch - start_epoch) / 60 ))
           left_min=$(( RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN - elapsed_min ))
-          bulk_min=$(( left_min - MAIN_MIN_MIN + GRACE_MIN ))
-          echo "> run-budget ${RUN_BUDGET_MIN} min | al gebruikt ~${elapsed_min} min | nog ${left_min} min | script-budget ${bulk_min} min (${MAIN_MIN_MIN} min gereserveerd voor de modus-taak)"
+          bulk_min=$(( left_min - MAIN_MIN_MIN - RELEASES_MIN + GRACE_MIN ))
+          echo "> run-budget ${RUN_BUDGET_MIN} min | al gebruikt ~${elapsed_min} min | nog ${left_min} min | script-budget ${bulk_min} min (${RELEASES_MIN} min voor stap 2 + ${MAIN_MIN_MIN} min voor de modus-taak gereserveerd)"
 
           if [ "$bulk_min" -le "$GRACE_MIN" ]; then
             echo "> Te weinig tijd over voor stap 1 - overgeslagen; de modus-taak draait hierna gewoon door."
@@ -262,11 +278,67 @@ jobs:
             exit "$status"
           fi
 
+      # Stap 2: upcoming-games controleren en uitgebrachte games naar de
+      # master promoveren ("Coming soon" -> echte datum). Keyless, dus deze
+      # stap draait ook zonder API key. Hij krijgt maximaal RELEASES_MIN
+      # minuten; MAIN_MIN_MIN + COMMIT_MIN blijven gereserveerd voor de
+      # modus-taak en de slotcommit. Het script houdt dezelfde max-1x-per-dag-
+      # regel aan als de extra-info-taak en werkt de kandidaten op oudste
+      # release_checked_at eerst af (eerlijke ronde). Promoties worden direct
+      # aan de master toegevoegd en upcoming.jsonl wordt aan het eind
+      # herschreven, dus één commit na afloop is genoeg (tussentijdse
+      # checkpoints zouden niets opleveren).
+      - id: releases
+        name: Upcoming-games promoveren naar de master (releasedatums)
+        timeout-minutes: 60
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          GRACE_MIN=5        # marge die het script zelf al van het budget aftrekt
+          MIN_STEP_MIN=5     # minder dan dit over -> stap overslaan
+          start_epoch=$(date -u -d "${{ github.run_started_at }}" +%s)
+          now_epoch=$(date -u +%s)
+          elapsed_min=$(( (now_epoch - start_epoch) / 60 ))
+          left_min=$(( RUN_BUDGET_MIN - RUN_SHUTDOWN_MIN - elapsed_min ))
+          script_min=$(( left_min - MAIN_MIN_MIN - COMMIT_MIN + GRACE_MIN ))
+          if [ "$script_min" -gt $(( RELEASES_MIN + GRACE_MIN )) ]; then
+            script_min=$(( RELEASES_MIN + GRACE_MIN ))
+          fi
+          echo "> run-budget ${RUN_BUDGET_MIN} min | al gebruikt ~${elapsed_min} min | nog ${left_min} min | script-budget ${script_min} min (max ${RELEASES_MIN} min + marge)"
+
+          if [ "$script_min" -le "$MIN_STEP_MIN" ]; then
+            echo "> Te weinig tijd over voor stap 2 - overgeslagen; de modus-taak draait hierna gewoon door."
+            exit 0
+          fi
+
+          echo "> starting fetch_games_initial_update_releases.py --max-duration-minutes ${script_min}..."
+          python fetch_games_initial_update_releases.py --max-duration-minutes "$script_min" > releases.log 2>&1
+          status=$?
+          echo "> fetch_games_initial_update_releases.py finished (exit $status). Last lines of releases.log:"
+          tail -n 12 releases.log
+
+          git add data/
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -q -m "data: releasedatums bijgewerkt (UTC $(date -u +'%Y-%m-%d %H:%M'))"
+            git push -q origin HEAD:main || echo "push failed - de slotcommit probeert het opnieuw"
+          fi
+
+          if [ "$status" -ne 0 ]; then
+            echo "! fetch_games_initial_update_releases.py ended with an error - see releases.log above."
+            exit "$status"
+          fi
+
       - id: main
         name: Modus-taak (popular / least-popular / random, dynamisch budget)
-        # Draait ALTIJD (los van het resultaat van stap 1): de modus-taak
-        # krijgt alle tijd die na stap 1 nog over is, min COMMIT_MIN voor de
-        # slotcommit. De modus komt uit de eerste stap
+        # Draait ALTIJD (los van het resultaat van stap 1 en 2): de modus-taak
+        # krijgt alle tijd die na stap 1 + 2 nog over is, min COMMIT_MIN voor
+        # de slotcommit. De modus komt uit de eerste stap
         # (23:00 UTC = popular, 07:00 UTC = least-popular, 15:00 UTC =
         # random); de input `mode` van een handmatige run gaat voor.
         #

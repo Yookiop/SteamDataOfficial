@@ -29,11 +29,17 @@ Drie officiele Steam-bronnen (geen derde partijen zoals SteamSpy):
      negative/total-tellingen), geen review-teksten.
 
 'Nieuwe games' zijn appids die wel in de officiele app-lijst zitten maar nog
-NIET in de JSON-output (data/games.jsonl). Van elke nieuwe game worden de
-relevante velden opgehaald en toegevoegd. Appids die er al in staan worden
+NIET bekend zijn (niet in games.jsonl en niet in upcoming.jsonl). Van elke
+nieuwe game worden de relevante velden opgehaald. Alleen games die
+DAADWERKELIJK UIT ZIJN (een echte releasedatum, dus een gevulde
+release_date_format) komen in data/games.jsonl; games die nog moeten
+verschijnen ("Coming soon", "To be announced", "Q4 2026", "2027", ...) gaan
+naar data/upcoming.jsonl - een klein record, zodat de master niet meegroeit
+met titels die nog moeten uitkomen. Appids die al bekend zijn worden
 overgeslagen. Stop je het script (Ctrl+C) of is het budget op, dan pakt de
-volgende run gewoon weer op waar games.jsonl gebleven was - er is GEEN apart
-checkpoint-bestand; het aantal regels in games.jsonl is de waarheid.
+volgende run gewoon weer op waar het gebleven was - er is GEEN apart
+checkpoint-bestand; games.jsonl + upcoming.jsonl samen zijn de waarheid over
+wat al bekeken is.
 
 Prijzen: elke game wordt opgevraagd met cc=us + l=english, dus price_overview
 is standaard USD en de tekst (genres/categorieen) altijd Engels - er wordt
@@ -44,9 +50,10 @@ final_formatted (hetzelfde bedrag). UITZONDERING: us_region_blocked-games
 hun price_overview heeft dan de valuta van die regio (bv. EUR voor nl) en
 ze staan in us_region_blocked.json.
 
-Filter: alleen type == "game" wordt opgeslagen. Apps die geen game zijn
-(dlc, demo, muziek, software, ...) worden automatisch in de blacklist gezet
-(data/blacklist.json). Een appid ZONDER US-storepagina (echte success:false
+Filter: alleen type == "game" wordt opgeslagen, en daarvan alleen de games
+met een echte releasedatum (de rest gaat naar upcoming.jsonl, zie boven).
+Apps die geen game zijn (dlc, demo, muziek, software, ...) worden
+automatisch in de blacklist gezet (data/blacklist.json). Een appid ZONDER US-storepagina (echte success:false
 op cc=us) wordt als volgt geclassificeerd:
   1. Bestaat de game in een andere regio (REGION_FALLBACKS, default cc=nl)?
      Dan wordt hij GEWOON OPGENOMEN in games.jsonl, opgehaald via die regio
@@ -73,7 +80,16 @@ no-store-duplicaat), dan wordt die bewaard in duplicates.jsonl met
 duplicate_of = het behouden appid.
 
 Output (in data/):
-    games.jsonl            1 JSON-object per regel, alleen games (type == "game")
+    games.jsonl            1 JSON-object per regel, alleen games (type ==
+                          "game") die DAADWERKELIJK UIT ZIJN (met een echte
+                          releasedatum als yyyy-mm-dd)
+    upcoming.jsonl         games die NOG NIET uit zijn (de API geeft geen
+                          exacte dag: "Coming soon", "To be announced",
+                          "Q4 2026", "2027", ...). Klein record (appid, naam,
+                          ruwe datum, release_checked_at); een game verhuist
+                          naar games.jsonl zodra Steam een echte datum
+                          publiceert - zie
+                          fetch_games_initial_update_releases.py
     blacklist.json         appids die NIET opnieuw worden geprobeerd
                           (niet-game, no_store_page of handmatig). Zelf
                           beheerbaar: eruit halen = weer 'nieuw'
@@ -135,10 +151,11 @@ import urllib.request
 from datetime import datetime
 
 # Bestandsrotatie: datasets groeien door in delen van max ~90 MB
-# (games.jsonl, duplicates.jsonl, ...). Al het lezen gaat via iter_lines
-# (delen samengevoegd), schrijven via RotatingAppend/remove_all_parts -
-# zie data_rotation.py.
-from data_rotation import (iter_lines, remove_all_parts, RotatingAppend)
+# (games.jsonl, duplicates.jsonl, upcoming.jsonl, ...). Al het lezen gaat via
+# iter_lines (delen samengevoegd), schrijven via RotatingAppend/
+# rewrite_rotated - zie data_rotation.py.
+from data_rotation import (iter_lines, remove_all_parts, rewrite_rotated,
+                           RotatingAppend)
 
 ISTORE_APP_LIST_URL = ("https://api.steampowered.com/IStoreService/"
                        "GetAppList/v1/")
@@ -159,6 +176,14 @@ STORE_BATCH = 1     # appids per storefront-request. appdetails accepteert
 # niets omgerekend) en bijgehouden in us_region_blocked.json.
 REGION_FALLBACKS = ("nl",)
 US_BLOCKED_FILE = "us_region_blocked.json"
+# Games die NOG NIET uitgebracht zijn (de API geeft geen exacte releasedatum:
+# "Coming soon", "To be announced", "Q4 2026", "2027", ...) gaan hierheen
+# i.p.v. naar de master. Zo bevat games.jsonl alleen games die daadwerkelijk
+# uit zijn (`release_date_format` = yyyy-mm-dd) en hoeft de master niet mee te
+# groeien met titels die nog moeten verschijnen. Zie main() en
+# fetch_games_initial_update_releases.py (die haalt ze hier weg zodra Steam een
+# echte datum publiceert).
+UPCOMING_FILE = "upcoming.jsonl"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -468,6 +493,73 @@ def append_duplicates(data_dir, records, seen):
     finally:
         writer.close()
     return written
+
+
+def upcoming_path(data_dir):
+    """Pad van de 'nog niet uitgebracht'-lijst (upcoming.jsonl)."""
+    return os.path.join(data_dir, UPCOMING_FILE)
+
+
+def load_upcoming(data_dir):
+    """Lees upcoming.jsonl* (alle rotatiedelen) in bestandsvolgorde.
+    Retourneert {appid: record}: games die nog GEEN echte releasedatum hebben
+    en daarom (nog) niet in de master staan."""
+    recs = {}
+    for line in iter_lines(upcoming_path(data_dir)):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+            aid = int(r.get("appid"))
+        except (TypeError, ValueError):
+            continue
+        recs[aid] = r
+    return recs
+
+
+def upcoming_stub(info, appid):
+    """Klein record voor upcoming.jsonl. Bewust GEEN prijs/genres/categorieen/
+    reviews: die halen we pas op als de game echt uitkomt (dat scheelt een
+    hoop ruimte, want het merendeel van de nieuwe appids is nog niet uit)."""
+    return {
+        "appid": appid,
+        "name": info.get("name"),
+        "release_date": info.get("release_date"),
+        "release_date_format": info.get("release_date_format") or "",
+        "release_checked_at": info.get("release_checked_at") or now_iso(),
+    }
+
+
+def append_upcoming(data_dir, records, seen):
+    """Schrijf stubs naar upcoming.jsonl* (alleen nieuwe appids; rotatie bij
+    ~90 MB). Retourneert hoeveel er nieuw zijn toegevoegd."""
+    written = 0
+    if not records:
+        return written
+    writer = RotatingAppend(upcoming_path(data_dir))
+    try:
+        for r in records:
+            try:
+                aid = int(r.get("appid"))
+            except (TypeError, ValueError):
+                continue
+            if aid in seen:
+                continue
+            writer.write_line(json.dumps(r, ensure_ascii=False))
+            seen.add(aid)
+            written += 1
+    finally:
+        writer.close()
+    return written
+
+
+def write_upcoming(data_dir, records):
+    """Volledige herschrijving van upcoming.jsonl* (mét rotatie). Wordt door
+    fetch_games_initial_update_releases.py gebruikt als er games uit de lijst
+    verdwijnen (omdat ze uitgebracht zijn). De volgorde wordt bewaard."""
+    rewrite_rotated(upcoming_path(data_dir),
+                    (json.dumps(r, ensure_ascii=False) for r in records))
 
 
 def load_blacklist(path):
@@ -966,8 +1058,8 @@ def main(argv=None):
                         "blijft 'nieuw' voor de volgende run "
                         "(default: geen limiet)")
     p.add_argument("--reset", action="store_true",
-                   help="games/blacklist/duplicates.jsonl wissen en opnieuw "
-                        "beginnen")
+                   help="games/upcoming/blacklist/duplicates.jsonl wissen en "
+                        "opnieuw beginnen")
     p.add_argument("--blacklist", default=None,
                    help="pad naar de blacklist (default: "
                         "<data-dir>/blacklist.json)")
@@ -1073,20 +1165,22 @@ def main(argv=None):
     if args.reset:
         # Opnieuw beginnen: dataset + output wissen (geen checkpoint meer).
         # us_region_blocked.json hoort erbij: die verwijst naar games die
-        # straks niet meer in de master staan. games.jsonl en
-        # duplicates.jsonl kunnen uit meerdere delen bestaan
+        # straks niet meer in de master staan. games.jsonl, duplicates.jsonl
+        # en upcoming.jsonl kunnen uit meerdere delen bestaan
         # (games_2.jsonl, duplicates_2.jsonl, ... na ~90 MB-rotatie) -
         # remove_all_parts wist basis + delen.
         if os.path.abspath(out_path) != os.path.join(data_dir, "games.jsonl"):
             remove_all_parts(out_path)
         remove_all_parts(os.path.join(data_dir, "games.jsonl"))
         remove_all_parts(os.path.join(data_dir, "duplicates.jsonl"))
+        remove_all_parts(upcoming_path(data_dir))
         for name in ("blacklist.json", US_BLOCKED_FILE):
             path = os.path.join(data_dir, name)
             if os.path.isfile(path):
                 os.remove(path)
-        print("> Reset: games/blacklist/duplicates/us_region_blocked.json "
-              "gewist - begint opnieuw vanaf het begin van de app-lijst")
+        print("> Reset: games/blacklist/duplicates/us_region_blocked/"
+              "upcoming gewist - begint opnieuw vanaf het begin van de "
+              "app-lijst")
 
     key = resolve_api_key(args)
 
@@ -1122,14 +1216,18 @@ def main(argv=None):
     known_appids, known_titles, title_appid = load_existing(out_path)
     blacklist = load_blacklist(blacklist_path)
     dup_seen = load_duplicate_appids(data_dir)
+    upcoming = load_upcoming(data_dir)
+    upcoming_seen = set(upcoming)
     us_blocked = load_us_region_blocked(data_dir)
     new_ids = sorted(aid for aid in api
                      if aid not in known_appids
                      and aid not in blacklist
-                     and aid not in dup_seen)
+                     and aid not in dup_seen
+                     and aid not in upcoming_seen)
 
     print(f"\nTotaal in de API-call          : {len(api)}")
-    print(f"Al bekend (in de output)       : {len(known_appids)}")
+    print(f"Al bekend (in games.jsonl)     : {len(known_appids)}")
+    print(f"Nog niet uitgebracht (upcoming): {len(upcoming_seen)}")
     print(f"In de blacklist               : {len(blacklist)}")
     print(f"Al duplicaat (duplicates.jsonl): {len(dup_seen)}")
     print(f"US-geblokkeerd (elders opgehaald): {len(us_blocked)}")
@@ -1167,7 +1265,7 @@ def main(argv=None):
 
     stats = {"requests": 0, "added": 0, "duplicate": 0, "dup_saved": 0,
              "other": 0, "skipped": 0, "failed": 0, "blacklisted": 0,
-             "us_blocked": 0}
+             "us_blocked": 0, "not_released": 0}
     added_titles = set()          # deze run toegevoegd (voorkomt intra-run dubbels)
 
     # Duurbudget (--max-duration-minutes): netjes stoppen enkele minuten
@@ -1191,9 +1289,21 @@ def main(argv=None):
     consecutive_failures = 0   # opeenvolgend mislukte requests deze run
 
     def save_new_game(info, aid, note=""):
-        """Schrijf een nieuw slank record naar games.jsonl en werk de
-        in-memory known-sets bij. Gebruikt door de gewone toevoeging én de
-        us_region_blocked-toevoeging (via een andere regio/valuta)."""
+        """Schrijf een opgehaalde game weg. UITGEBRACHT (een echte
+        releasedatum) -> naar games.jsonl (de master) en de in-memory
+        known-sets bijwerken. NOG NIET UITGEBRACHT (release_date_format leeg:
+        "Coming soon", "Q4 2026", "2027", ...) -> naar upcoming.jsonl, met
+        een klein stub-record: zo blijft de master de lijst van games die
+        écht uit zijn en groeit hij niet mee met titels die nog moeten
+        verschijnen. Retourneert True als de game in de master is gezet."""
+        if not str(info.get("release_date_format") or "").strip():
+            if append_upcoming(data_dir, [upcoming_stub(info, aid)],
+                               upcoming_seen):
+                stats["not_released"] += 1
+                print(f"   ~ {aid}  {info.get('name')}  "
+                      f"({info.get('release_date')!r} - nog niet "
+                      "uitgebracht, naar upcoming.jsonl)")
+            return False
         title = (info.get("name") or "").strip().lower()
         games_file.write_line(json.dumps(info, ensure_ascii=False))
         stats["added"] += 1
@@ -1204,6 +1314,7 @@ def main(argv=None):
         print(f"   + {aid}  {info.get('name')}  {note}"
               f"(players: {info.get('last_seen_player_count')}, reviews: "
               f"{info.get('review_score_desc')})")
+        return True
 
     try:
         for start in range(0, len(selected), STORE_BATCH):
@@ -1289,14 +1400,17 @@ def main(argv=None):
                             enrich_live(i2, aid, args, stats)
                             currency = ((i2.get("price_overview") or {})
                                         .get("currency"))
-                            if us_blocked_add(us_blocked, aid,
-                                              i2.get("name"), cc_found,
-                                              currency):
-                                stats["us_blocked"] += 1
-                            save_new_game(
-                                i2, aid,
-                                f"(US-geblokkeerd -> {cc_found}/"
-                                f"{currency}) ")
+                            # Alleen in us_region_blocked.json zetten als de
+                            # game ook echt in de master komt (een nog niet
+                            # uitgebrachte game gaat naar upcoming.jsonl).
+                            if save_new_game(
+                                    i2, aid,
+                                    f"(US-geblokkeerd -> {cc_found}/"
+                                    f"{currency}) "):
+                                if us_blocked_add(us_blocked, aid,
+                                                  i2.get("name"), cc_found,
+                                                  currency):
+                                    stats["us_blocked"] += 1
                         elif o2 == "other":
                             stats["other"] += 1
                             reason = f"not_game:{i2.get('type')}"
@@ -1367,13 +1481,16 @@ def main(argv=None):
             save_us_region_blocked(data_dir, us_blocked)
 
     remaining_new = (len(new_ids) - stats["added"] - stats["blacklisted"]
-                     - stats["duplicate"])
+                     - stats["duplicate"] - stats["not_released"])
     print("\n=== Samenvatting ===")
     print(f"Appids verwerkt deze run     : {processed}")
     print(f"Requests (store-API)         : {stats['requests']}")
     print(f"Nieuwe games toegevoegd      : {stats['added']}   "
           f"(waarvan us_region_blocked: {stats['us_blocked']})")
     print(f"Totaal in games.jsonl        : {len(known_appids)}")
+    print(f"Nog niet uitgebracht         : {stats['not_released']}   "
+          "(naar upcoming.jsonl; de master bevat alleen uitgebrachte games)")
+    print(f"Totaal in upcoming.jsonl     : {len(upcoming_seen)}")
     print(f"Duplicaten (duplicates.jsonl): {stats['duplicate']}   "
           f"({stats['dup_saved']} nieuw bewaard; de rest stond er al in)")
     print(f"In de blacklist gezet        : {stats['blacklisted']}   "

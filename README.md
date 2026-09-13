@@ -17,20 +17,26 @@ derde partijen (zoals SteamSpy). Deze repo vervangt de oude `SteamData`-repo.
    zonder `purchase_type=all` toont Warframe bv. 2.871 reviews i.p.v.
    676.084). `num_per_page=0` → alleen de samenvatting, geen review-teksten.
 
-## Twee scripts
+## De scripts
 
-**`fetch_games_initial.py`** — de EENMALIGE volledige doorgang. Elke game
-komt er precies 1× in `data/games.jsonl` (de **basis** — elke game 1×,
-**zonder `appid_amount`**):
+**`fetch_games_initial.py`** — de volledige doorgang. Elke game komt er
+precies 1× in: in `data/games.jsonl` als de game **daadwerkelijk uit is**
+(een echte releasedatum), anders in `data/upcoming.jsonl` (de **basis** —
+elke game 1×, **zonder `appid_amount`**):
 
 1. Vraagt je **API key** (popup-venster) — of leest `--key` / een bewaarde key.
 2. Haalt de officiële **app-lijst** op uit de **Web API** met key:
    `IStoreService/GetAppList/v1` (gepagineerd via `max_results` + `last_appid`).
-3. **"Nieuw" = appids in de lijst die nog niet in de output staan.**
+3. **"Nieuw" = appids die nog niet bekend zijn** (niet in `games.jsonl` én
+   niet in `upcoming.jsonl`).
 4. Haalt per nieuwe game de **store-data** op (Storefront API, 1 appid per
    request, `cc=us&l=english` → USD/Engels) plus **`last_seen_player_count`**
    (keyless `GetNumberOfCurrentPlayers`) en de **review-samenvatting**
-   (Review API, zie boven) en schrijft het slanke record weg.
+   (Review API, zie boven). Heeft de game een **echte releasedatum**, dan gaat
+   het slanke record naar `games.jsonl`; is het nog "Coming soon" /
+   "Q4 2026" / "2027", dan gaat er alleen een **klein stub-record** (appid,
+   naam, ruwe datumtekst, `release_checked_at`) naar `upcoming.jsonl` — zo
+   bevat de master uitsluitend games die écht uit zijn.
 
 > De review-samenvatting kost 1 extra request per game en komt ALTIJD mee
 > (geen `--no-reviews`-optie meer) — reviews zijn standaard zo compleet
@@ -38,8 +44,8 @@ komt er precies 1× in `data/games.jsonl` (de **basis** — elke game 1×,
 > een volgende `fetch_new_game_info.py`-run (elke extra-info-regel haalt
 > ze vers op) of na `--reset`.
 
-Blijf dit script draaien tot elke game 1× is opgenomen — het is hervatbaar en
-incrementeel (zie onder).
+Blijf dit script draaien tot elke game 1× is opgenomen (in `games.jsonl` of
+`upcoming.jsonl`) — het is hervatbaar en incrementeel (zie onder).
 
 **`fetch_new_game_info.py`** — de EXTRA INFO (was: tijdlijn/
 `player_history`). Per run een extra regel per game in
@@ -57,6 +63,37 @@ Gebruik `--limit` om per run te begrenzen.
 Zo krijg je per game veel meer dan alleen appid + naam, en alles komt van
 Steam zelf.
 
+**`fetch_games_initial_update_releases.py`** — de OPVOLGER van de
+releasedatum: het controleert `data/upcoming.jsonl` opnieuw (de games die nog
+niet uit zijn). Geeft Steam nu **wel** een echte datum, dan wordt de game
+**gepromoveerd**: het volledige record (met spelersaantal + reviews) gaat naar
+`games.jsonl` en de stub verdwijnt uit `upcoming.jsonl`. Is er nog geen
+ datum, dan wordt de stub bijgewerkt (de ruwe tekst kan veranderen, bv.
+`2026` → `Q4 2026`) plus `release_checked_at` (UTC) — met dezelfde **max. 1×
+per dag**-regel als de extra-info-taak, zodat de 3 runs van een dag niet
+dezelfde games pakken. De volgorde is een **eerlijke ronde**: de games met de
+**oudste `release_checked_at`** gaan eerst (een game die nog nooit is
+gecontroleerd staat vooraan) en een gecontroleerde game krijgt de datum van
+vandaag, dus die sluit achteraan aan — elke game komt zo even vaak aan de beurt
+als de rest, zonder dat random iemand voortrekt. `--limit` en/of
+`--max-duration-minutes` begrenzen de run. Keyless, en het raakt de
+blacklist/duplicaten niet aan.
+
+```bash
+python fetch_games_initial_update_releases.py --report-only
+python fetch_games_initial_update_releases.py --limit 500
+python fetch_games_initial_update_releases.py --max-duration-minutes 30
+python fetch_games_initial_update_releases.py --ignore-same-day --limit 100
+python fetch_games_initial_update_releases.py --migrate-unreleased   # eenmalig
+```
+
+> 📅 **Eenmalige migratie:** de games die al in de master stonden mét een lege
+> `release_date_format` (van vóór deze scheiding) verhuizen met
+> `--migrate-unreleased` naar `upcoming.jsonl`; daarna bevat `games.jsonl`
+> echt alleen uitgebrachte games. Steam publiceert de exacte dag vaak pas kort
+> vóór de release, dus wat "Coming soon" is blijft in upcoming staan tot het
+> zover is.
+
 ## Velden per game
 
 `appid`, `type`, `name`, `is_free`, `price_overview` (USD, zoals de API hem
@@ -68,6 +105,10 @@ geeft — er wordt **niets omgerekend**), `publishers`, `genres` (namen),
 `review_score_desc` bv. `Very Positive`/`Mixed`/`No user reviews`,
 `review_positive`, `review_negative`, `review_total` — `null` als die request
 mislukte).
+
+> 📅 **`release_checked_at`** staat alleen in `upcoming.jsonl`: het UTC-
+> tijdstip waarop die game voor het laatst op een releasedatum is
+> gecontroleerd (voor de max. 1× per dag-regel). In de master staat het niet.
 
 > 🔁 **Steam-lancering-clamp:** Steam is op **12 september 2003** gelanceerd.
 > Games met een releasedatum vóór die datum (de API geeft bv. Half-Life als
@@ -265,14 +306,22 @@ Elke run doet hetzelfde voorwerk en daarna zijn eigen taak:
 
 1. **nieuwe games** — `fetch_games_initial.py` haalt alle nog onbekende
    appids op, met een budget van `RUN_BUDGET_MIN − RUN_SHUTDOWN_MIN −
-   (al gebruikt) − MAIN_MIN_MIN`; elke 5 minuten een checkpoint-commit.
-2. **eigen taak** — `fetch_new_game_info.py --mode <...>` met **alle
+   (al gebruikt) − RELEASES_MIN − MAIN_MIN_MIN`; elke 5 minuten een
+   checkpoint-commit. Uitgebrachte games → `games.jsonl`, nog niet
+   uitgebrachte → `upcoming.jsonl` (zie hierboven).
+2. **releasedatums** — `fetch_games_initial_update_releases.py` controleert
+   `upcoming.jsonl` en promoveert games die nu wél een echte releasedatum
+   hebben naar `games.jsonl`. Maximaal `RELEASES_MIN` minuten per run;
+   keyless, dus deze stap draait ook zonder API key. Daarna één commit —
+   `upcoming.jsonl` wordt pas aan het eind herschreven, dus tussentijdse
+   checkpoints zouden niets opleveren.
+3. **eigen taak** — `fetch_new_game_info.py --mode <...>` met **alle
    resterende tijd** (min `COMMIT_MIN` voor de slotcommit): `popular`
    (23:00 UTC / 01:00 NL), `least-popular` (07:00 UTC / 09:00 NL) of `random`
    (15:00 UTC / 17:00 NL). Welke modus het is leidt de workflow af uit het
    UTC-uur; een handmatige run kan het met de input `mode` overschrijven. Elke
    5 minuten een checkpoint-commit.
-3. **slot** — de data wordt gecommit + gepusht: alleen de **bronbestanden**
+4. **slot** — de data wordt gecommit + gepusht: alleen de **bronbestanden**
    (`data/*.jsonl` en `*.json`). Deze stap draait ook als een eerdere stap is
    misgegaan (`if: always()`).
 
@@ -281,7 +330,8 @@ De **CSV-tabellen zitten niet in deze pijplijn**: die maak je lokaal met
 workflow committ dus nooit CSV's.
 
 In **alle** runs geldt de **max. 1× per dag**-regel: een game die op dezelfde
-run-dag al is ververst wordt overgeslagen (zie `--mode` hierboven).
+run-dag al is ververst wordt overgeslagen (zie `--mode` hierboven én
+`release_checked_at` bij stap 2).
 
 Het budget staat bovenin de workflow:
 
@@ -289,7 +339,8 @@ Het budget staat bovenin de workflow:
 env:
   RUN_BUDGET_MIN: "330"     # totale wall-clock budget van de hele run
   RUN_SHUTDOWN_MIN: "5"     # laatste minuten: alleen afronden (geen scriptwerk)
-  MAIN_MIN_MIN: "20"        # minimaal gereserveerd voor stap 2 (de modus-taak)
+  MAIN_MIN_MIN: "20"        # minimaal gereserveerd voor stap 3 (de modus-taak)
+  RELEASES_MIN: "30"        # max. voor stap 2 (releasedatums); 0 = overslaan
   COMMIT_MIN: "5"           # reserve voor de slotcommit (git add/commit/push)
 ```
 
@@ -326,7 +377,8 @@ compleet is.
 
 | Bestand            | Inhoud                                                       |
 | ------------------ | ------------------------------------------------------------ |
-| `games.jsonl`      | basis: 1 JSON-object per regel, alleen games, elke game 1×, **zonder `appid_amount`** — het aantal regels is de voortgang |
+| `games.jsonl`      | basis: 1 JSON-object per regel, alleen games die **uit zijn** (echte releasedatum), elke game 1×, **zonder `appid_amount`** — het aantal regels is de voortgang |
+| `upcoming.jsonl`   | games die **nog niet uit zijn**: alleen appid, naam, de ruwe datumtekst (`Coming soon`, `Q4 2026`, `2027`, ...) en `release_checked_at`. Promoveert naar `games.jsonl` zodra Steam een echte datum geeft |
 | `games_extra_info.jsonl` | extra info (was `player_history.jsonl`): per run een momentopname per game, doorlopend genummerd per game vanaf `<appid>_1` (`_2`, `_3`, ...), met `DataUpdatedAt` = datumtijd van schrijven (**UTC**) |
 | `blacklist.json`   | appids die niet opnieuw worden geprobeerd (niet-game / geen storepagina / geblokkeerd / handmatig), met reden en datum |
 | `duplicates.jsonl` | dubbele titels, per appid 1×, met `duplicate_of` = behouden appid |
