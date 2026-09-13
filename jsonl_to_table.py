@@ -13,8 +13,10 @@ vanuit, zodat je de data in Excel/sheets kunt bekijken zonder dbt Cloud:
                           kolommen; alleen de leesbare bedragen, geen ruwe
                           centen, incl. de review-samenvatting: review_score,
                           review_score_desc, review_positive, review_negative,
-                          review_total). GEEN appid_amount: dit is de basis,
-                          elke appid komt er maar 1x in voor
+                          review_total, en average_players: het gemiddelde
+                          last_seen_player_count over master + momentopnames,
+                          afgerond op 2 decimalen). GEEN appid_amount: dit is
+                          de basis, elke appid komt er maar 1x in voor
     game_genres.csv       appid + genre (1 regel per genre per appid)
     game_categories.csv   appid + category (1 regel per category per appid)
     game_publishers.csv   appid + publisher (1 regel per publisher per appid)
@@ -38,6 +40,15 @@ player_history.jsonl) en schrijft daarvan games_extra_info.csv: elke regel
 is daar een aparte momentopname, dus een appid kan meerdere regels hebben
 (gesorteerd op appid + appid_amount-nummer _1, _2, ...). Staat het
 bestand er niet, dan wordt alleen games_extra_info.csv overgeslagen.
+
+De kolom average_players wordt bij ELKE run opnieuw berekend uit alles wat
+we van een game weten: de master-snapshot (last_seen_player_count in
+games.jsonl) + al zijn momentopnames (games_extra_info.jsonl). Regels
+zonder spelerswaarde (null) tellen niet mee; heeft een game nergens een
+spelersaantal, dan blijft de kolom leeg (onbekend, geen 0). Dit veld wordt
+NIET in de jsonl-bestanden op schijf geschreven: de brondata blijft
+ongewijzigd en de waarde is altijd zo vers als de laatste keer dat dit
+script draaide.
 
 Bestandsrotatie (data_rotation.py): de jsonl-datasets groeien sinds
 2026-09-05 door in delen van max ~90 MB (games.jsonl + games_2.jsonl +
@@ -107,6 +118,19 @@ MAIN_FIELDS = [
     # doorlopende per-game nummering zit in games_extra_info.csv (zie
     # HISTORY_FIELDS hieronder).
 ]
+
+# Gemiddeld spelersaantal per appid (games.csv): het gemiddelde van
+# last_seen_player_count uit de master (games.jsonl) + alle momentopnames
+# (games_extra_info.jsonl), afgerond op AVG_PLAYERS_DECIMALS decimalen.
+# Wordt alleen in-memory berekend; de jsonl-bestanden blijven ongewijzigd.
+AVG_PLAYERS_COL = "average_players"
+AVG_PLAYERS_DECIMALS = 2
+
+# Kolommen van games.csv: de ruwe velden + het berekende gemiddelde. Het
+# gemiddelde staat bewust NIET in MAIN_FIELDS: HISTORY_FIELDS is
+# MAIN_FIELDS + [...], dus dan zou het ook in games_extra_info.csv
+# opduiken terwijl het daar per regel hetzelfde getal is.
+MAIN_TABLE_FIELDS = MAIN_FIELDS + [(AVG_PLAYERS_COL, None)]
 
 CHILD_TABLES = [          # bestandsnaam    -> pad in het JSON-record
     ("game_genres",      ["genres"]),
@@ -198,6 +222,28 @@ def flatten_rows(records, fields):
             row[col] = dig(rec, path)
         rows.append(row)
     return rows
+
+
+def average_players_by_appid(master_records, extra_records):
+    """Gemiddeld aantal spelers per appid over ALLES wat we weten: de
+    master-snapshot (games.jsonl) + alle momentopnames
+    (games_extra_info.jsonl). Alleen int-waarden tellen mee (null is
+    onbekend, geen 0). Retourneert {appid: gemiddelde} met het gemiddelde
+    afgerond op AVG_PLAYERS_DECIMALS; appids zonder enige spelerswaarde
+    staan er niet in (-> lege kolom in de CSV)."""
+    sums, samples = {}, {}
+    for records in (master_records, extra_records):
+        for rec in records:
+            try:
+                aid = int(dig(rec, ["appid"]))
+            except (TypeError, ValueError):
+                continue
+            pc = dig(rec, ["last_seen_player_count"])
+            if isinstance(pc, int):
+                sums[aid] = sums.get(aid, 0) + pc
+                samples[aid] = samples.get(aid, 0) + 1
+    return {aid: round(sums[aid] / samples[aid], AVG_PLAYERS_DECIMALS)
+            for aid in samples}
 
 
 def write_csv(path, rows, fields):
@@ -293,8 +339,37 @@ def main(argv=None):
     print(f"> {len(records)} records gelezen uit {in_path}{delen} "
           f"({total_lines} regels).")
 
-    # Hoofdtabel: 1 rij per appid, gesorteerd op appid.
+    # Extra info (games_extra_info.jsonl*, geschreven door
+    # fetch_new_game_info.py) wordt ALTIJD eerst gelezen: de momentopnames
+    # leveren de spelersaantallen voor average_players in games.csv en
+    # worden daarna ook zelf als games_extra_info.csv weggeschreven (1 rij
+    # per momentopname). Ontbreken alle delen, dan blijft average_players
+    # leeg en wordt alleen games_extra_info.csv overgeslagen.
+    extra_base = canonical_base(os.path.abspath(args.extra))
+    extra_parts = all_part_paths(extra_base)
+    extra_records, extra_n = [], 0
+    if extra_parts:
+        extra_records, _, extra_n = read_records_multi(extra_base)
+        delen = f" uit {extra_n} delen" if extra_n > 1 else ""
+        print(f"> {len(extra_records)} extra-info-regels gelezen uit "
+              f"{extra_base}{delen}.")
+
+    # Gemiddeld spelersaantal per appid: master-snapshot (games.jsonl) +
+    # alle momentopnames (games_extra_info.jsonl), afgerond op 2 decimalen.
+    # Alles wat null is telt niet mee; een game zonder enige spelerswaarde
+    # krijgt None -> lege cel in games.csv (onbekend, geen 0).
+    averages = average_players_by_appid(records, extra_records)
+
+    # Hoofdtabel: 1 rij per appid, gesorteerd op appid. average_players
+    # komt niet uit het record maar is hierboven berekend; het wordt alleen
+    # in-memory toegevoegd, de jsonl-bestanden op schijf blijven ongewijzigd.
     rows = flatten_rows(records, MAIN_FIELDS)
+    for rec, row in zip(records, rows):
+        try:
+            aid = int(dig(rec, ["appid"]))
+        except (TypeError, ValueError):
+            aid = None
+        row[AVG_PLAYERS_COL] = averages.get(aid)
     rows.sort(key=lambda r: (r["appid"] is None, r["appid"] or 0))
 
     # Kindtabellen: (appid, waarde), uniek binnen een appid, gesorteerd.
@@ -312,8 +387,10 @@ def main(argv=None):
 
     # Wegschrijven (utf-8-sig zodat Excel de tekens goed toont).
     main_path = os.path.join(out_dir, "games.csv")
-    n = write_csv(main_path, rows, MAIN_FIELDS)
-    print(f"> Hoofdtabel geschreven: {main_path} ({n} regels, 1 per appid)")
+    n = write_csv(main_path, rows, MAIN_TABLE_FIELDS)
+    bekend = sum(1 for r in rows if r[AVG_PLAYERS_COL] is not None)
+    print(f"> Hoofdtabel geschreven: {main_path} ({n} regels, 1 per appid; "
+          f"{AVG_PLAYERS_COL} bekend voor {bekend} games)")
 
     for name, _ in CHILD_TABLES:
         path = os.path.join(out_dir, f"{name}.csv")
@@ -324,27 +401,23 @@ def main(argv=None):
         print(f"> {path} ({len(child_rows[name])} regels)")
 
     # Extra info (games_extra_info.jsonl*, geschreven door
-    # fetch_new_game_info.py): 1 rij per momentopname (meerdere rijen per
-    # appid: _1, _2, ...). Rotatiedelen (_2, _3, ...) worden samengevoegd.
-    # Ontbreken alle delen, dan wordt alleen games_extra_info.csv
-    # overgeslagen.
-    extra_base = canonical_base(os.path.abspath(args.extra))
-    extra_parts = all_part_paths(extra_base)
-    if extra_parts:
-        extra_records, _, extra_n = read_records_multi(extra_base)
-        if extra_records:
-            extra_rows = flatten_rows(extra_records, HISTORY_FIELDS)
-            extra_rows.sort(key=lambda r: (r["appid"] is None,
-                                           r["appid"] or 0,
-                                           amount_ordinal(r)))
-            out = os.path.join(out_dir, "games_extra_info.csv")
-            n = write_csv(out, extra_rows, HISTORY_FIELDS)
-            delen = f" uit {extra_n} delen" if extra_n > 1 else ""
-            print(f"> Extra info geschreven: {out} ({n} regels{delen}, "
-                  "1 per momentopname per appid)")
-        else:
-            print(f"> {extra_base} (en delen) zijn leeg - geen "
-                  "games_extra_info.csv.")
+    # fetch_new_game_info.py): hierboven al ingelezen voor average_players.
+    # Wegschrijven: 1 rij per momentopname (meerdere rijen per appid: _1,
+    # _2, ...). Rotatiedelen (_2, _3, ...) zijn al samengevoegd. Ontbreken
+    # alle delen, dan wordt alleen games_extra_info.csv overgeslagen.
+    if extra_parts and extra_records:
+        extra_rows = flatten_rows(extra_records, HISTORY_FIELDS)
+        extra_rows.sort(key=lambda r: (r["appid"] is None,
+                                       r["appid"] or 0,
+                                       amount_ordinal(r)))
+        out = os.path.join(out_dir, "games_extra_info.csv")
+        n = write_csv(out, extra_rows, HISTORY_FIELDS)
+        delen = f" uit {extra_n} delen" if extra_n > 1 else ""
+        print(f"> Extra info geschreven: {out} ({n} regels{delen}, "
+              "1 per momentopname per appid)")
+    elif extra_parts:
+        print(f"> {extra_base} (en delen) zijn leeg - geen "
+              "games_extra_info.csv.")
     else:
         print(f"> {extra_base} niet gevonden - games_extra_info.csv "
               "overgeslagen.")

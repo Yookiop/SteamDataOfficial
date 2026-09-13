@@ -420,6 +420,14 @@ De **CSV-tabellen** zijn afgeleid en staan wél in `.gitignore` (zie hieronder).
 > `games.jsonl` krijg je `games.csv` met alleen de header, die weer
 > meegroeit zodra je opnieuw ophaalt).
 >
+> 📊 `games.csv` heeft een berekende kolom **`average_players`**: het gemiddelde
+> `last_seen_player_count` van een game over de **master** (`games.jsonl`) + al
+> zijn **momentopnames** (`games_extra_info.jsonl`), afgerond op 2 decimalen.
+> Regels zonder spelerswaarde (`null`) tellen niet mee; heeft een game nergens
+> een spelersaantal, dan blijft de cel leeg (onbekend, geen 0). De waarde wordt
+> bij elke run opnieuw berekend en **niet** in de jsonl-bestanden geschreven —
+> de brondata blijft ongewijzigd.
+>
 > ⚠️ **Eén uitzondering:** `games_extra_info.csv` wordt alleen
 > (opnieuw) geschreven als `games_extra_info.jsonl` **bestaat én niet
 > leeg** is. Is die bron leeg of weg terwijl je de CSV eerder wél hebt
