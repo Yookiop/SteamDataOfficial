@@ -1,17 +1,21 @@
-# Steam run 3/3: 19:40 NL (zomer) -> WILLEKEURIGE games, minst ververste eerst
+# Steam run 3/3: 18:42 NL -> WILLEKEURIGE games, minst ververste eerst
 #
 # Dit is 1 van de 3 runs per dag. Elk bestand heeft zijn eigen cron en zijn
 # eigen taak; het voorwerk (nieuwe games + releasedatums) is in alle drie
 # hetzelfde:
 #
-#   1/3  popular.yml        40 1 * * *    (03:40 NL)  -> popular
-#   2/3  least_popular.yml  40 9 * * *    (11:40 NL)  -> least-popular
-#   3/3  random.yml         40 17 * * *   (19:40 NL)  -> random
+#   1/3  popular.yml        42 2 * * *    (02:42 NL)  -> popular
+#   2/3  least_popular.yml  42 10 * * *   (10:42 NL)  -> least-popular
+#   3/3  random.yml         42 18 * * *   (18:42 NL)  -> random
 #
-# LET OP: GitHub-cron werkt in UTC en kent GEEN zomertijd. Dit zijn dus de
-# zomertijden; in de winter starten de drie runs 1 uur eerder in NL-tijd
-# (02:40 / 10:40 / 18:40). De taak verandert daar niet van: die staat per
-# bestand vast en niet in de cron.
+# 8 uur uit elkaar: elke run heeft 8 uur voor max ~5,5 uur werk, dus een late
+# start (GitHub's planner is "best effort") loopt de volgende run niet in de
+# weg. De concurrency-groep hieronder is de vangrail: overlapt er toch iets
+# (handmatige run, een run die uitloopt), dan wacht de volgende netjes.
+#
+# TIJD: de crons staan in NL-tijd dank zij `timezone: Europe/Amsterdam` (geen
+# UTC-rekenwerk en geen zomertijd-verschuiving meer). De taak staat per bestand
+# vast en niet in de cron.
 #
 # Elke run doet drie dingen:
 #  STAP 1  fetch_games_initial.py (geen --limit): alle nog onbekende appids uit
@@ -51,12 +55,13 @@
 #
 # Handmatig testen: Actions > "Steam run 3/3 - random" > Run workflow.
 
-name: Steam run 3/3 - random (19:40 NL)
+name: Steam run 3/3 - random (18:42 NL)
 
 on:
-  # 17:40 UTC = 19:40 NL in de zomer (18:40 NL in de winter; cron is UTC-only).
+  # 18:42 NL, jaarrond (de timezone-regel hieronder).
   schedule:
-    - cron: "40 17 * * *"
+    - cron: "42 18 * * *"
+      timezone: "Europe/Amsterdam"
   workflow_dispatch: # handmatig: doet exact dezelfde run
 
 permissions:
@@ -70,10 +75,18 @@ env:
   COMMIT_MIN: "5"       # reserve voor de slotcommit
 
 concurrency:
-  # BEWUST dezelfde groep in alle 3 bestanden: zo draaien ze nooit tegelijk
-  # (ze pushen alle drie naar main). Een nieuwe run wacht op de lopende run en
-  # wordt nooit geannuleerd.
+  # Eén schrijver tegelijk. De 3 runs staan 8 uur uit elkaar, dus normaal
+  # raken ze elkaar niet; dit is de vangrail voor als er tóch iets overlapt
+  # (handmatige run, een run die uitloopt). Ze werken namelijk op DEZELFDE
+  # bestanden en pushen naar dezelfde branch, en `git push` is geen merge: een
+  # push vanaf een verouderd commit wordt geweigerd en deze workflow doet geen
+  # pull/rebase - parallel draaien zou dus werk weggooien.
+  #
+  # queue: max = meerdere runs mogen in de wachtrij staan (max 100). Zonder
+  # deze regel annuleert de nieuwste run de oudste wachtende (standaard
+  # `queue: single`) - precies wat je niet wilt als er 3 dingen samenkomen.
   group: steam-data-fetch
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -318,7 +331,7 @@ jobs:
         shell: bash
         run: |
           set -u
-          echo "> run            : 3/3 - random (cron 40 17 * * * = 19:40 NL zomer)"
+          echo "> run            : 3/3 - random (cron 42 18 * * *, Europe/Amsterdam)"
           echo "> nieuwe games   : ${{ steps.bulk.outcome }} (${{ steps.bulk.conclusion }})"
           echo "> releasedata    : ${{ steps.releases.outcome }} (${{ steps.releases.conclusion }})"
           echo "> eigen taak     : ${{ steps.main.outcome }} (${{ steps.main.conclusion }})"
