@@ -209,6 +209,18 @@ Twee kanttekeningen:
 Het wachten zelf is geen risico: het telt mee voor de limiet "workflow run time"
 (35 dagen) en de wachttijd is hier hooguit ~11 uur.
 
+**Maakt de volgorde uit?** Voor de uitkomst niet, voor de verdeling een beetje.
+Elke run kiest zijn eigen selectielijst (`--mode`), dus er kan niets misgaan en er
+is geen run die op de uitkomst van een andere wacht. Wat wél meespeelt is de
+**max-1×-per-dag**-regel: wat een eerdere run vandaag al ververst heeft, wordt in
+een latere run overgeslagen (`run_day` = UTC+2, dus de grens ligt op middernacht
+NL). De natuurlijke orde is daarom 1 → 2 → 3: eerst de twee gerichte selecties
+(meest/minst populair), daarna `3_random` als opruimer — die pakt met
+`--weight-refreshes` juist de minst vaak ververste games, dus precies waar
+`2_least_popular` ook op mikt. Start je random eerst, dan schuift least-popular
+een stukje op in zijn eigen lijst; er gaat geen werk verloren en geen game wordt
+die dag twee keer gedaan.
+
 ---
 
 ## 6. Opties vergeleken
