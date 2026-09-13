@@ -188,6 +188,27 @@ Twee dingen om in de gaten te houden:
   eerder. Wat er echt gedraaid is, zie je in de slot-samenvatting van de run
   (per stap `outcome`/`conclusion` + de totale looptijd).
 
+**Alle drie tegelijk starten mag ook.** Met `queue: max` mogen er tot **100** runs
+in de wachtrij van de groep staan (docs, Actions-limieten: "Concurrency group
+queue: 100 workflow runs / concurrency group"; alles daarboven wordt geweigerd).
+Drie starts betekent dus: 1 draait, 2 staan `pending` — **er vervalt niets**. Dat
+is precies het verschil met de standaard `queue: single`, waarbij een nieuwe
+wachtende run de oudste wachtende **annuleert**.
+
+Twee kanttekeningen:
+
+* **De volgorde is niet gegarandeerd.** De wachtrij is FIFO op *wachttijd*, maar
+  de docs zeggen er letterlijk bij: "Since the actual start time of a job or run
+  may vary, ordering is not guaranteed." Klik je ze binnen een paar seconden,
+  dan loopt het in de praktijk in klikvolgorde — reken er alleen niet op. Is de
+  volgorde belangrijk, start de volgende pas als de vorige echt draait.
+* **Alles op één dag is ~16,5 uur** (3 × 5,5). Start je ze om 08:00 alle drie,
+  dan eindigt de laatste rond 00:30. Wil je dat niet, houd `3_random` dan voor de
+  avond.
+
+Het wachten zelf is geen risico: het telt mee voor de limiet "workflow run time"
+(35 dagen) en de wachttijd is hier hooguit ~11 uur.
+
 ---
 
 ## 6. Opties vergeleken
