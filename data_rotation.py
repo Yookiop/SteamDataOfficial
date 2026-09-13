@@ -12,14 +12,17 @@ GitHub's limiet van 100 MB per bestand komt:
     games_extra_info.jsonl      deel 1 (de 'basis', zonder cijfer)
     games_extra_info_2.jsonl    deel 2
     games_extra_info_3.jsonl    deel 3
-    ...                         t/m MAX_PARTS (5 = basis + _2 .. _5)
+    ...                         t/m max_parts (standaard MAX_PARTS = 5)
 
 Zodra een deel de grens zou overschrijden, wordt het 'gelockt' (er komt
 nooit meer een regel bij) en gaat de volgende regel naar het volgende
-deel. Zo blijft elk deel ruim onder de 100 MB; basis + 4 rotaties van
-~90 MB + de git-historie eroverheen komt samen op ~1 GB, vandaar dat
-MAX_PARTS op 5 staat (daarboven wordt de repo onpraktisch groot voor
-GitHub).
+deel. Zo blijft elk deel ruim onder de 100 MB. De limiet is PER DATASET in
+te stellen: MAX_PARTS (= 5) is de standaard, en een dataset die harder
+groeit mag een eigen, hogere limiet krijgen (max_parts=... bij
+RotatingAppend/rewrite_rotated). games_extra_info gebruikt bv.
+MAX_PARTS_EXTRA_INFO = 10 in fetch_new_game_info.py. Let op de vuistregel
+van GitHub: de repo groeit ongeveer mee met de data, dus houd een repo
+onder ~1 GB.
 
 Alle lezers (fetch_games_initial.py, fetch_new_game_info.py en
 jsonl_to_table.py) moeten delen herkennen en SAMENVOEGEN (union in
@@ -38,14 +41,18 @@ import re
 # Een deel wordt gelockt zodra de VOLGENDE regel hem boven deze grens zou
 # tillen (90 MiB = ~94,4 MB decimaal; blijft ruim onder GitHub's 100 MB).
 ROTATE_BYTES = 90 * 1024 * 1024
-# Hoogste deelnummer: de basis (zonder cijfer) telt als deel 1, daarna
-# _2 .. _MAX_PARTS. 5 delen * ~90 MB ~= 450 MB werkboom; met de
-# git-historie eroverheen ~1 GB, de vuistregel-limiet van GitHub.
+# STANDAARD maximaal aantal delen: de basis (zonder cijfer) telt als deel 1,
+# daarna _2 .. _MAX_PARTS. 5 delen * ~90 MB ~= 450 MB per dataset.
+# Een dataset die harder groeit mag een EIGEN, hogere limiet krijgen: geef
+# max_parts mee aan RotatingAppend/rewrite_rotated (bv. games_extra_info
+# gebruikt MAX_PARTS_EXTRA_INFO = 10 in fetch_new_game_info.py). Houd bij het
+# verhogen de 1 GB-vuistregel van GitHub in het oog: de git-historie groeit
+# ongeveer mee met de data.
 MAX_PARTS = 5
 
 
 class RotationError(RuntimeError):
-    """Wordt gegooid als een dataset al MAX_PARTS delen heeft en er nóg
+    """Wordt gegooid als een dataset al max_parts delen heeft en er nóg
     een rotatie nodig is."""
 
 
@@ -195,10 +202,7 @@ class RotatingAppend:
                 break                # heeft nog ruimte -> hier verder schrijven
             self.index += 1          # deel is vol (gelockt) -> volgende
         if self.index > max_parts:
-            raise RotationError(
-                f"! Dataset {self.base_path} heeft al {self.max_parts} "
-                "delen van ~90 MB (de limiet). Verwijder oude delen of "
-                "verhoog MAX_PARTS in data_rotation.py.")
+            raise self._limit_error()
         d = os.path.dirname(self.base_path)
         if d:
             os.makedirs(d, exist_ok=True)
@@ -215,12 +219,20 @@ class RotatingAppend:
         except OSError:
             return os.path.getsize(self.path)
 
+    def _limit_error(self):
+        """Duidelijke fout (RotationError) voor het bereiken van het maximum
+        aantal delen van deze dataset."""
+        mb = self.max_parts * self.rotate_bytes // (1024 * 1024)
+        return RotationError(
+            f"! Dataset {self.base_path} zit aan de limiet van "
+            f"{self.max_parts} delen van ~90 MB (~{mb} MB). Verwijder oude "
+            "delen, of verhoog de limiet: MAX_PARTS in data_rotation.py is "
+            "de standaard, en een script kan per dataset een eigen limiet "
+            "meegeven (bv. --max-parts bij fetch_new_game_info.py).")
+
     def _rotate(self):
         if self.index >= self.max_parts:
-            raise RotationError(
-                f"! Dataset {self.base_path} heeft al {self.max_parts} "
-                "delen van ~90 MB (de limiet). Verwijder oude delen of "
-                "verhoog MAX_PARTS in data_rotation.py.")
+            raise self._limit_error()
         self._f.close()
         locked = self.path
         self.index += 1

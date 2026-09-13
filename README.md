@@ -150,8 +150,9 @@ python fetch_new_game_info.py --limit 3500 --random --weight-refreshes
                                              # willekeurige games, maar de minst
                                              # vaak ververste eerst (binnen elke
                                              # groep random): alle games komen
-                                             # op den duur aan de beurt
-python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
+                                             # op den duur aan de beurtpython fetch_new_game_info.py --max-parts 20 # max. rotatiedelen van ~90 MB voor
+                                             # games_extra_info*.jsonl
+                                             # (default 10 = ~900 MB aan json)python fetch_new_game_info.py --top_bottom_random --max-duration-minutes 270
                                              # (oude modus) 3 gelijke tijdblokken
                                              # in één run: ~90 min meest populair,
                                              # ~90 min minst populair,
@@ -369,11 +370,14 @@ groeien (de master `games.jsonl` tijdens de bulk, en vooral
 `games_extra_info.jsonl` bij elke extra-info-run) worden daarom in delen
 van maximaal **~90 MB** bewaard via `data_rotation.py`:
 
-- **Naamgeving:** de basis zonder cijfer, daarna `<naam>_2.<ext>`,
-  `<naam>_3.<ext>`, ... t/m `<naam>_5.<ext>` (`MAX_PARTS = 5` — basis +
-  4 rotaties van ~90 MB + de git-historie eroverheen ≈ de GitHub-
-  vuistregel van ~1 GB). Voorbeelden: `games.jsonl` + `games_2.jsonl`;
-  `games_extra_info.jsonl` + `games_extra_info_2.jsonl` ... `_5`.
+- **Naamgeving & limiet:** de basis zonder cijfer, daarna `<naam>_2.<ext>`,
+  `<naam>_3.<ext>`, ... De **standaard**limiet is `MAX_PARTS = 5` in
+  `data_rotation.py` (basis + 4 rotaties van ~90 MB). `games_extra_info.jsonl`
+  groeit het hardst en krijgt daarom een **eigen, hogere limiet**:
+  `MAX_PARTS_EXTRA_INFO = 10` in `fetch_new_game_info.py` (~900 MB aan
+  json-data; aan te passen met `--max-parts`). Voorbeelden: `games.jsonl` +
+  `games_2.jsonl` ... `_5`; `games_extra_info.jsonl` + `games_extra_info_2.jsonl`
+  ... `_10`.
 - **Locken:** zodra een deel door de volgende regel boven ~90 MB zou
   komen, wordt het **gelockt** (er komt nooit meer een regel bij) en
   gaat die regel naar het volgende deel. Een deel dat aan het einde van
@@ -393,10 +397,17 @@ van maximaal **~90 MB** bewaard via `data_rotation.py`:
   produceert `jsonl_to_table.py` één samengevoegde `games_extra_info.csv`
   (en één `games.csv`) — in Power BI is dat dus **één combinatietabel**,
   geen losse CSV's per deel.
-- **Limiet bereikt?** Als er al `_5` bestaat en nóg een rotatie nodig is,
-  gooit het script een duidelijke fout (`RotationError`) — oude delen
-  verwijderen of `MAX_PARTS`/`ROTATE_BYTES` bovenaan `data_rotation.py`
-  aanpassen.
+- **Limiet bereikt?** Zit een dataset aan zijn maximum (bij `games.jsonl` dus
+  `_5`, bij `games_extra_info.jsonl` `_10`), dan gooit het script een
+  duidelijke fout (`RotationError`) — oude delen verwijderen of de limiet
+  verhogen (`MAX_PARTS` in `data_rotation.py`, of `--max-parts` bij
+  `fetch_new_game_info.py`). `fetch_new_game_info.py` waarschuwt al zodra het
+  één deel onder de limiet zit. Onthoud wel: **de git-repo groeit ongeveer mee
+  met de data** (de historie houdt de deltas bij), dus ~900 MB aan delen is
+  ruwweg 0,6–1 GB aan `.git` — dichter bij de ~1 GB-vuistregel van GitHub dan
+  je op het eerste gezicht denkt. Een hogere `--max-parts` schuift de grens
+  alleen op; **bewuster verzamelen is op den duur de echte oplossing** (denk
+  aan dagaggregatie van oude momentopnamen).
 - ⚠️ **Dummy-delen (testdata):** `data/games_extra_info.jsonl` + `_2`..`_5`
   bevatten dummy-momentopnamen (Counter-Strike/Valve-games 10/20/440/570/730,
   doorlopende nummering) en `data/games.jsonl` + `games_2`..`games_5`

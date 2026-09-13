@@ -41,7 +41,8 @@ bestand er niet, dan wordt alleen games_extra_info.csv overgeslagen.
 
 Bestandsrotatie (data_rotation.py): de jsonl-datasets groeien sinds
 2026-09-05 door in delen van max ~90 MB (games.jsonl + games_2.jsonl +
-..., games_extra_info.jsonl + games_extra_info_2.jsonl + ..., t/m _5).
+..., games_extra_info.jsonl + games_extra_info_2.jsonl + ...; per dataset
+begrensd door MAX_PARTS / --max-parts, zie data_rotation.py).
 Dit script voegt AL die delen samen (union in volgorde deel 1, 2, 3, ...)
 - je geeft dus gewoon het basispad op (--input / --extra) en de CSVs
 bevatten de samengevoegde data alsof het één bestand was. In Power BI is
@@ -78,7 +79,7 @@ import sys
 from datetime import date, timedelta
 
 # Bestandsrotatie: datasets bestaan uit delen van max ~90 MB
-# (basis + _2 .. _5). all_part_paths/canonical_base voegen delen samen.
+# (basis + _2, _3, ...). all_part_paths/canonical_base voegen delen samen.
 from data_rotation import all_part_paths, canonical_base
 
 MAIN_FIELDS = [
@@ -176,7 +177,7 @@ def read_records(path):
 
 
 def read_records_multi(base_path):
-    """Lees een dataset uit ALLE rotatiedelen (basis + <naam>_2 .. _5),
+    """Lees een dataset uit ALLE rotatiedelen (basis + <naam>_2, <naam>_3, ...),
     in volgorde samengevoegd. Retourneert (records, totaal_aantal_regels,
     aantal_delen)."""
     parts = all_part_paths(base_path)
@@ -324,7 +325,7 @@ def main(argv=None):
 
     # Extra info (games_extra_info.jsonl*, geschreven door
     # fetch_new_game_info.py): 1 rij per momentopname (meerdere rijen per
-    # appid: _1, _2, ...). Rotatiedelen (_2 .. _5) worden samengevoegd.
+    # appid: _1, _2, ...). Rotatiedelen (_2, _3, ...) worden samengevoegd.
     # Ontbreken alle delen, dan wordt alleen games_extra_info.csv
     # overgeslagen.
     extra_base = canonical_base(os.path.abspath(args.extra))

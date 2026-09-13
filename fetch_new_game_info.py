@@ -141,6 +141,12 @@ niet gededuped en niet geblacklist: elke run telt. Geen API key nodig (dit
 script haalt alleen de (keyless) store-, spelersaantal- en review-data op
 van games die al in de master staan).
 
+ROTATIE: games_extra_info.jsonl groeit het hardst (elke run een momentopname
+per game, ~840 B per regel) en wordt opgesplitst in delen van ~90 MB:
+games_extra_info.jsonl, _2, _3, ... t/m --max-parts (default
+MAX_PARTS_EXTRA_INFO = 10, dus ~900 MB aan json-data). Daarna stopt het
+script met een RotationError; zie data_rotation.py.
+
 Gebruik:
     python fetch_new_game_info.py             # alle games pollen (meeste spelers eerst)
     python fetch_new_game_info.py --limit 500 # max. 500 games deze run (populairste eerst)
@@ -238,10 +244,20 @@ GRACEFUL_STOP_MARGIN_MINUTES = 5
 RUN_DAY_OFFSET = timedelta(hours=2)
 
 # --mode least-popular: de "onderste" set games = games met een GEMIDDELD
-# spelersaantal onder deze grens (gemiddelde uit games.csv + alle
-# games_extra_info.csv-regels van de game). Binnen die set krijgen games die
-# het MINST VAAK zijn ververst voorrang (zie de docstring).
+# spelersaantal onder deze grens (gemiddelde uit games.jsonl + alle
+# games_extra_info.jsonl-regels van de game). Binnen die set krijgen games
+# die het MINST VAAK zijn ververst voorrang (zie de docstring).
 LEAST_POPULAR_MAX_AVG = 100
+
+# Rotatielimiet voor games_extra_info*.jsonl. Deze dataset groeit het hardst
+# (elke run een momentopname per game, ~840 B per regel) en mag daarom verder
+# opsplitsen dan de standaard van data_rotation.MAX_PARTS (5):
+#   10 delen * ~90 MB = ~900 MB json-data.
+# De git-repo groeit ongeveer mee met de data (de historie houdt de deltas
+# bij), dus hiermee blijf je rond de vuistregel van GitHub (~1 GB per repo).
+# Meer mag met --max-parts, maar dat schuift alleen de grens op - het is geen
+# oplossing voor de groei zelf (zie de rotatie-sectie in de README).
+MAX_PARTS_EXTRA_INFO = 9
 
 # Labels per --mode (voor de meldingen).
 MODE_LABELS = {
@@ -761,6 +777,15 @@ def main(argv=None):
                         "aan de beurt komen i.p.v. dat een uniforme "
                         "steekproef steeds dezelfde games pakt. Zonder "
                         "deze vlag is de volgorde puur willekeurig")
+    p.add_argument("--max-parts", type=int, default=MAX_PARTS_EXTRA_INFO,
+                   help=f"max. aantal rotatiedelen van ~90 MB voor "
+                        f"games_extra_info*.jsonl (default: "
+                        f"{MAX_PARTS_EXTRA_INFO} = ~"
+                        f"{MAX_PARTS_EXTRA_INFO * 90} MB aan json-data). "
+                        "Daarboven stopt het script met een RotationError: "
+                        "oude delen verwijderen of deze grens verhogen. Let "
+                        "op: de git-repo groeit ongeveer mee met de data "
+                        "(vuistregel: repo < ~1 GB)")
     p.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                    help=f"seconden rust tussen twee requests "
                         f"(default: {DEFAULT_DELAY})")
@@ -987,6 +1012,10 @@ def main(argv=None):
     print(f"Al in games_extra_info*.jsonl ({n_parts} deel"
           + ("en" if n_parts != 1 else "") + "): "
           f"{sum(extra_counts.values())} regels")
+    if n_parts >= args.max_parts - 1:
+        print(f"! Let op: {n_parts} van max. {args.max_parts} rotatiedelen in "
+              "gebruik - de limiet nadert. Oude delen verwijderen of "
+              "--max-parts verhogen (zie de README, sectie Bestandsrotatie).")
     if args.top_bottom_random:
         print("Modus                       : 3 fasen (--top_bottom_random): "
               "meest populair -> minst populair -> willekeurig")
@@ -1121,8 +1150,10 @@ def main(argv=None):
     stats = {"requests": 0, "added": 0, "skipped": 0}
     os.makedirs(data_dir, exist_ok=True)
     # Schrijven met rotatie: bij ~90 MB wordt het deel gelockt en gaat de
-    # rest naar games_extra_info_2.jsonl, _3.jsonl, ... (max _5).
-    extra_file = RotatingAppend(extra_path, log=print)
+    # rest naar games_extra_info_2.jsonl, _3.jsonl, ... (default max 10 delen
+    # = ~900 MB; zie MAX_PARTS_EXTRA_INFO / --max-parts).
+    extra_file = RotatingAppend(extra_path, log=print,
+                                max_parts=args.max_parts)
     processed = 0
     phase_done = {}          # per fase: aantal ververste games (samenvatting)
 
