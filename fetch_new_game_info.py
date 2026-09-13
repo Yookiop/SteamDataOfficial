@@ -225,7 +225,17 @@ DEFAULT_DELAY = 0.4
 DEFAULT_JITTER = 0.1
 DEFAULT_TIMEOUT = 30
 DEFAULT_RETRIES = 6
-DEFAULT_MAX_REQUESTS = 10000
+
+# Noodrem op het aantal HTTP-requests per run. Stond op 10000, maar dat is
+# VEEL te laag gebleken: de teller loopt op per request (appdetails + huidige
+# spelers + reviews = min. 3 per game, en retries tellen ook mee), dus 10000
+# requests = ~3300 games = ~1 uur werk. De run stopte daardoor na een uur
+# terwijl het tijdsbudget (--max-duration-minutes) nog uren over had, en dat
+# gebeurde MET exitcode 0 (de stap bleef dus groen). Even hoog als in
+# fetch_games_initial.py (feitelijk uit): het echte budget is de TIJD, en
+# Steam zelf remt met HTTP 429. Wil je tóch een plafond, geef dan expliciet
+# --max-requests mee.
+DEFAULT_MAX_REQUESTS = 222222222
 
 # Al het lezen gaat via de jsonl-bestanden (data/games.jsonl +
 # data/games_extra_info.jsonl, met alle rotatiedelen). De CSV-tabellen uit
