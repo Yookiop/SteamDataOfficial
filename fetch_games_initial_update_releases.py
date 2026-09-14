@@ -348,9 +348,13 @@ def main(argv=None):
                           f"{info.get('type')!r} - niet langer een game)")
 
             if stats["checked"] and stats["checked"] % 25 == 0:
+                # Let op: gebruik hier alleen sleutels die in `stats` bestaan
+                # (zie de definitie boven de lus). 'filled' heeft hier nooit
+                # bestaan - dat gaf een KeyError zodra er 25 games in een run
+                # waren gecontroleerd (run van 13-09-2026, stap 2).
                 print(f"  [{datetime.now().strftime('%H:%M:%S')}] "
                       f"gecontroleerd={stats['checked']}  "
-                      f"datum gevonden={stats['filled']}  "
+                      f"datum gevonden={stats['promoted']}  "
                       f"requests={stats['requests']}")
 
             wait_chunked(args.delay + random_jitter(args.jitter))
