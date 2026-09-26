@@ -5,12 +5,21 @@
  * - Tijdlijn: "Amount of Steam games over time" - cumulatief aantal
  *   games (appids) tot elke releasedatum, geanimeerd in de browser.
  *   Elke tick verschuift de tijdcursor en voegt de releases t/m die
- *   datum toe aan de lijn (tijdsverloop simulatie).
+ *   datum toe aan de lijn (tijdsverloop simulatie). De y-as schaalt
+ *   DYNAMISCH mee met de teller in GROVE stappen (0..1000 → 10.000 →
+ *   50.000 → 150.000 → ...; `Y_STEPS`/`yCeil`) i.p.v. meteen 0..130.000;
+ *   bij een stapwissel ZOOMT de as ~1,2 s vloeiend (met crossfade van de
+ *   oude/nieuwe gridlabels) i.p.v. een harde sprong. Aan het einde houdt
+ *   de animatie 10 s de eindstand vast (`END_PAUSE_MS`) voordat de cyclus
+ *   opnieuw begint.
  * - MP4-export: canvas.captureStream + MediaRecorder, download van een
  *   volledige cyclus (geen ffmpeg nodig, zoals Backgrounds).
  * - Weekday-grafiek: aantal games per dag-van-week, primair uit
  *   date.csv (day_of_week_label, ISO maandag=1..zondag=7); releasedatums
  *   buiten date.csv (vóór 2003) direct uit de datum berekend.
+ * - Filter: alleen releasedatums t/m vandaag (einddatum = vandaag).
+ *   Placeholder-datums daarna (bv. 9998-01-01) vallen buiten BEIDE
+ *   grafieken en de tijdlijn-as eindigt op vandaag.
  * ===================================================================== */
 
 "use strict";
@@ -88,12 +97,14 @@ const el = {
 const state = {
   ready: false,
   gamesTotal: 0,          // totaal aantal regels in games.csv
-  withDate: 0,            // aantal met geldige releasedatum
+  withDate: 0,            // aantal met geldige releasedatum t/m vandaag
+  futureDated: 0,         // aantal met releasedatum NA vandaag (placeholder)
+  todayMs: 0,             // UTC-middernacht van vandaag (eindgrens = vandaag)
   relTimes: [],           // unieke releasedatums (ms, oplopend)
   relCounts: [],          // cumulatief aantal t/m elke relTime
+  yTrans: [],             // vloeiende y-as-overgangen: {p, from, to}
   firstYear: 0, lastYear: 0,
-  tMin: 0, tMax: 0,       // gepadded as-bereik (ms)
-  ymax: 0,
+  tMin: 0, tMax: 0,       // as-bereik (ms) — tMax = vandaag (einddatum-filter)
   weekdayCounts: [0, 0, 0, 0, 0, 0, 0],
   weekdayFallback: 0,     // releases buiten date.csv (weekday direct berekend)
   // playback
@@ -125,6 +136,37 @@ function niceStep(raw) {
   return step * mag;
 }
 
+/* Grove y-as-stappen voor de dynamische y-as (vraag 2026-09-27): na 1000
+ * meteen naar 10.000, dan 50.000, 150.000, ... (de 100.000 wordt
+ * overgeslagen) — bewust GROTE sprongen, zodat de y-labels niet steeds
+ * verspringen (flikkeren). */
+const Y_STEPS = [1000, 10000, 50000, 150000, 250000, 500000, 1000000];
+
+/* Kleinste y-as-stap ≥ v (lijst hierboven; ver daarboven: verdubbelen). */
+function yCeil(v) {
+  for (const s of Y_STEPS) {
+    if (v <= s + 1e-9) return s;
+  }
+  let s = Y_STEPS[Y_STEPS.length - 1];
+  while (s < v) s *= 2;
+  return s;
+}
+
+/* Duur van een vloeiende y-as-overgang (ms wall-time; onafhankelijk van de
+ * Duration-slider). In dit venster zoomt de as soepel naar de volgende
+ * stap i.p.v. een harde sprong. */
+const Y_TRANS_MS = 1200;
+
+/* Tickwaarden van een y-as met bovengrens ymax: 5 gelijke delen, zodat de
+ * BOVENSTE tick altijd ymax zelf is (de gebruiker wil bv. 150.000 zien,
+ * geen 140.000) en alle labels ronde getallen blijven (Y_STEPS zijn rond). */
+function yTicks(ymax) {
+  const step = ymax / 5;
+  const out = [];
+  for (let v = 0; v <= ymax + 1e-9; v += step) out.push(v);
+  return out;
+}
+
 /* 'yyyy-mm-dd' -> ms sinds epoch (UTC-middernacht, geen TZ-shift). */
 function dateToMs(s) {
   const p = s.split("-");
@@ -139,6 +181,12 @@ function dateToDowIdx(s) {
 function fmtMonthYear(ms) {
   const d = new Date(ms);
   return `${d.getUTCFullYear()}-${MONTHS_FULL[d.getUTCMonth()]}`;
+}
+/* 'yyyy-mm-dd' (UTC) - voor footers/bijschriften. */
+function fmtDateISO(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
 
 /* Eenvoudige RFC4180-achtige CSV-parser (aanhalingstekens + , in veld). */
@@ -211,13 +259,18 @@ async function loadData() {
       }
     }
 
-    // Games met geldige releasedatum; tel de dag-van-week.
+    // Games met geldige releasedatum t/m vandaag; tel de dag-van-week.
+    // Releasedatums NA vandaag zijn placeholder-datums van nog niet
+    // uitgebrachte games (bv. 9998-01-01) en blijven buiten de grafieken.
+    const now = new Date();
+    state.todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
     state.gamesTotal = gamesRows.length;
     const byDate = new Map(); // dateStr -> aantal
     let withDate = 0;
     for (const g of gamesRows) {
       const d = g.release_date_fmt;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d || "")) continue;
+      if (dateToMs(d) > state.todayMs) { state.futureDated++; continue; }
       withDate++;
       byDate.set(d, (byDate.get(d) || 0) + 1);
       const label = dowMap[d];
@@ -241,30 +294,49 @@ async function loadData() {
     }
     state.relTimes = times;
     state.relCounts = counts;
-    const dFirst = new Date(times[0]);
-    const dLast = new Date(times[times.length - 1]);
-    state.firstYear = dFirst.getUTCFullYear();
-    state.lastYear = dLast.getUTCFullYear();
+    state.firstYear = new Date(times[0]).getUTCFullYear();
+    state.lastYear = new Date(state.todayMs).getUTCFullYear();
     // De grafiek begint bij de Steam-lancering (september 2003), dus geen
     // lege voorloop in 2002: start op 1 september van het eerste jaar (of
     // op de eerste releasedatum zelf als die eerder zou liggen).
     state.tMin = Math.min(Date.UTC(state.firstYear, 8, 1),
                           state.relTimes[0]);
-    state.tMax = Date.UTC(state.lastYear + 1, 5, 1);       // midden van jaar erna
-    state.ymax = Math.ceil(counts[counts.length - 1] / 100) * 100;
+    state.tMax = state.todayMs;   // eindgrens = vandaag (geen padding meer)
+
+    // Vloeiende y-as: op welke p verspringt de y-as-stap (Y_STEPS) en van/
+    // naar welke bovengrens. drawTimeline zoomt daar ~1,2 s soepel naartoe
+    // (Y_TRANS_MS) i.p.v. een harde sprong.
+    state.yTrans = [];
+    {
+      let prevY = yCeil(0);
+      for (let i = 0; i < times.length; i++) {
+        const y = yCeil(counts[i] * 1.05);
+        if (y !== prevY) {
+          state.yTrans.push({
+            p: (times[i] - state.tMin) / (state.tMax - state.tMin),
+            from: prevY,
+            to: y,
+          });
+          prevY = y;
+        }
+      }
+    }
 
     // Footers / koptekst.
     el.dataInfo.textContent =
       `${fmtInt(state.gamesTotal)} games from games.csv · ` +
-      `${fmtInt(state.withDate)} with a release date`;
+      `${fmtInt(state.withDate)} with a release date up to today`;
     el.timelineFoot.textContent =
-      `${fmtInt(state.withDate)} games with a known release date ` +
-      `(${fmtInt(state.gamesTotal)} in total in games.csv) · ` +
+      `${fmtInt(state.withDate)} games with a release date up to today ` +
+      `(${fmtDateISO(state.todayMs)}) · ` +
+      (state.futureDated
+        ? `${fmtInt(state.futureDated)} games dated after today excluded · `
+        : "") +
       `${state.relTimes.length} unique release dates · ` +
       `animation from ${state.firstYear} to ${state.lastYear}`;
     const dowTotal = state.weekdayCounts.reduce((a, b) => a + b, 0);
     el.weekdayFoot.textContent =
-      `Based on ${fmtInt(dowTotal)} releases · weekday from date.csv ` +
+      `Based on ${fmtInt(dowTotal)} releases up to today · weekday from date.csv ` +
       `(ISO, Monday=1)${state.weekdayFallback
         ? ` · ${state.weekdayFallback} releases before 2003 computed directly from the date`
         : ""}`;
@@ -298,7 +370,6 @@ function drawTimeline(p) {
   const pw = W - M.l - M.r, ph = H - M.t - M.b;
   const st = state;
   const X = (t) => x0 + ((t - st.tMin) / (st.tMax - st.tMin)) * pw;
-  const Y = (v) => y0 + ph - (v / st.ymax) * ph;
 
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = C.bg;
@@ -316,11 +387,54 @@ function drawTimeline(p) {
   const idx = upperBound(st.relTimes, tCur);   // # releases met tijd <= cursor
   const curCount = idx > 0 ? st.relCounts[idx - 1] : 0;
 
-  /* Y-grid + labels */
-  const yStep = niceStep(st.ymax / 8);
+  /* Dynamische y-as: schaalt mee met de huidige teller in GROVE stappen
+   * (Y_STEPS: 1000 → 10.000 → 50.000 → ...) met ~5% kopruimte; minimum
+   * 0..1000, want het duurt ~7 jaar voor 1000 games. Bij een stapwissel
+   * ZOOMT de as ~1,2 s vloeiend naar de nieuwe bovengrens (smoothstep)
+   * i.p.v. een harde sprong. */
+  let ymax = yCeil(curCount * 1.05);
+  let trans = null, transE = 0;
+  const transW = Y_TRANS_MS / st.durMs;   // vensterbreedte in p-eenheden
+  for (const tr of st.yTrans) {
+    if (p >= tr.p && p <= tr.p + transW) {
+      trans = tr;
+      const t = (p - tr.p) / transW;
+      transE = t * t * (3 - 2 * t);       // smoothstep (rustig in/uit)
+      ymax = tr.from + (tr.to - tr.from) * transE;
+      break;
+    }
+  }
+  const Y = (v) => y0 + ph - (v / ymax) * ph;
+
+  /* Y-grid + labels — tijdens een overgang cross-faden de tickwaarden van
+   * de oude (1-e) en nieuwe (e) as; waarden die in beide sets zitten
+   * blijven vol zichtbaar. Alle posities volgen de geïnterpoleerde
+   * schaal Y, zodat de as als één geheel rustig uitzoomt. */
+  const ticks = new Map();               // tickwaarde -> alpha
+  if (trans) {
+    for (const v of yTicks(trans.from)) ticks.set(v, 1 - transE);
+    for (const v of yTicks(trans.to)) {
+      ticks.set(v, Math.min(1, (ticks.get(v) || 0) + transE));
+    }
+  } else {
+    for (const v of yTicks(ymax)) ticks.set(v, 1);
+  }
   ctx.font = axisFont();
   ctx.textAlign = "right";
-  for (let v = 0; v <= st.ymax; v += yStep) {
+  /* Knippen: gridlijnen EXACT op het plot, maar de labels in de
+   * linkerkolom met een marge boven de plot — zo blijft de bovenste tick
+   * (bv. 150.000, hij hangt met zijn bovenkant boven de rand) volledig
+   * zichtbaar en schuiven inkomende labels tijdens een zoom netjes vanaf
+   * de rand naar binnen i.p.v. boven de grafiek te zweven. */
+  const labelPad = axis.size + 8;      // ruimte voor het bovenste ticklabel
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, y0, pw, ph);                             // plot: gridlijnen
+  ctx.rect(0, y0 - labelPad, x0, ph + labelPad + 24);   // labels links
+  ctx.clip();
+  for (const [v, a] of ticks) {
+    if (a < 0.02) continue;              // vrijwel onzichtbaar = overslaan
+    ctx.globalAlpha = a;
     ctx.strokeStyle = C.grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -329,7 +443,9 @@ function drawTimeline(p) {
     ctx.stroke();
     ctx.fillStyle = axis.color;
     ctx.fillText(fmtInt(v), x0 - 14, Y(v) + 7);
+    ctx.globalAlpha = 1;
   }
+  ctx.restore();
 
   /* X-grid + jaarlabels (elke 2 jaar) */
   const yStart = new Date(st.tMin).getUTCFullYear();
@@ -508,12 +624,18 @@ function setPlayUI() {
   el.playBtn.textContent = state.playing ? "⏸ Pause" : "▶ Play";
 }
 
+/* Pauze op het einde van de animatie: 10 s de eindstand vasthouden voordat
+ * de volgende cyclus begint (volledige cyclus = durMs + END_PAUSE_MS). */
+const END_PAUSE_MS = 10000;
+
 function loop(ts) {
   if (state.ready && state.playing) {
     if (!state.lastTs) state.lastTs = ts;
     const dt = ts - state.lastTs;
     state.elapsed += dt;
-    const p = (state.elapsed % state.durMs) / state.durMs;
+    const cycle = state.durMs + END_PAUSE_MS;
+    const et = state.elapsed % cycle;                      // tijd in de cyclus
+    const p = et >= state.durMs ? 1 : et / state.durMs;    // laatste 10 s: eindstand
     state.pauseP = p;
     drawTimeline(p);
   }
