@@ -180,7 +180,7 @@ function dateToDowIdx(s) {
 }
 function fmtMonthYear(ms) {
   const d = new Date(ms);
-  return `${d.getUTCFullYear()}-${MONTHS_FULL[d.getUTCMonth()]}`;
+  return `${MONTHS_FULL[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
 }
 /* 'yyyy-mm-dd' (UTC) - voor footers/bijschriften. */
 function fmtDateISO(ms) {

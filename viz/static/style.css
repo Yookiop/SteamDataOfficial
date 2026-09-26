@@ -215,3 +215,12 @@ main {
   padding: 12px 16px;
   font-size: 16px;
 }
+
+/* ---- Video charts (viz/video.html): chart-picker ---- */
+.chips { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.chips .btn { padding: 8px 14px; font-size: 16px; }
+.chips .btn.active {
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: #0d141d;
+}
