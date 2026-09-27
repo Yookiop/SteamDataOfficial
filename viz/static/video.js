@@ -2,21 +2,24 @@
  * Steam video charts (viz/video.html) - vijf losse video-visuals op
  * dezelfde CSV's als de hoofdpagina (games.csv + game_genres.csv):
  *
- *   1) race  - bar chart race: genres racen om de meeste games (cumulatief).
- *   2) heat  - release-kalender 2003->nu (GitHub-stijl; elke dag een blokje,
- *              de sweep vult chronologisch; teller loopt mee).
- *   3) f2p   - free-to-play vs paid: cirkeldiagram (paid vs free, samen
- *              100%) + klok met echte wijzerverhouding (minutenwijzer 12x
- *              zo snel als de uurwijzer) en maand-jaar eronder.
- *   4) indie - "Indie takeover": 100%-ribbon met het Indie-aandeel per jaar.
- *   5) players - spelersverdeling: cirkeldiagram van 5 buckets (0-10 /
- *                10-100 / 100-1k / 1k-10k / >10k gemiddelde spelers) dat
- *                cumulatief t/m de datum groeit, met legenda rechts.
+ *   1) map     - genre-map: morphing treemap; elke tegel = een genre,
+ *                oppervlak = aandeel van alle genre-tags; de kaart groeit
+ *                en hervormt terwijl de tijd vordert (Indie -> kwart deel).
+ *   2) spiral  - release-spiraal: 1 ring per jaar (januari bovenaan), elke
+ *                stip = 1 dag; helderder/groter = meer releases. De sweep
+ *                onthult de spiraal van binnen (2003) naar buiten (nu).
+ *   3) f2p     - free-to-play vs paid: cirkeldiagram (paid vs free, samen
+ *                100%) + klok met echte wijzerverhouding (minutenwijzer 12x
+ *                zo snel als de uurwijzer) en maand-jaar eronder.
+ *   4) indie   - "Indie takeover": thermometer; het kwik = het cumulatieve
+ *                Indie-aandeel van alle releases, met mijlpalen 25/50/75%.
+ *   5) players - player-funnel: hoeveel games bereiken welke spelerstand?
+ *                (alle met data -> >=1 -> >=10 -> ... -> >=100k gemiddeld),
+ *                als log-geschaalde staircase met exacte aantallen.
  *
  * Net als de hoofdpagina: canvas 1600x900, Play/Restart/Duur-slider,
  * MP4-export (MediaRecorder) en 10 s eind-hold voordat de cyclus opnieuw
- * begint. De race houdt de bar-posities bij in `state.racePos` (per-frame
- * easing; reset bij Restart/export/chart-wissel).
+ * begint.
  * ===================================================================== */
 
 "use strict";
@@ -56,19 +59,19 @@ const INDIE_COLOR = "#7ee081";
 const REST_COLOR = "#31465c";
 
 const CHARTS = {
-  race:  { title: "Genre race",           dur: 60, slug: "genre_race" },
-  heat:  { title: "Release calendar",     dur: 45, slug: "release_calendar" },
-  f2p:   { title: "Free-to-play vs paid", dur: 30, slug: "f2p_vs_paid" },
-  indie: { title: "Indie takeover",       dur: 30, slug: "indie_takeover" },
-  players: { title: "Player count",       dur: 45, slug: "player_count" },
+  map:     { title: "Genre map",            dur: 60, slug: "genre_map" },
+  spiral:  { title: "Release spiral",       dur: 60, slug: "release_spiral" },
+  f2p:     { title: "Free-to-play vs paid", dur: 30, slug: "f2p_vs_paid" },
+  indie:   { title: "Indie takeover",       dur: 30, slug: "indie_takeover" },
+  players: { title: "Player funnel",        dur: 45, slug: "player_funnel" },
 };
 
 const HINTS = {
-  race: "Bar lengths are relative to the current #1; bars swap position as genres overtake each other (a game can carry several genres).",
-  heat: "Every square is one day; the sweep fills the calendar chronologically and the counter follows. Brighter = more releases that day.",
+  map: "Each tile is a genre (the 9 biggest + an 'Other' tile); tile area = its share of all genre tags (a game can carry several). The map reshapes as Steam grows - watch Indie claim a quarter of it.",
+  spiral: "One ring = one year (January at the top); every dot is one day, brighter and bigger when more games came out. The spiral unwinds from 2003 to today.",
   f2p: "Donut = cumulative paid vs free share of all releases (together 100%); the clock hands run like a real clock (minute hand 12x the hour hand) as the timeline advances, with the month-year below it.",
-  indie: "Each column is one year; the green part is the Indie share of that year's releases (Steam's 'Indie' genre tag).",
-  players: "Pie of average players per game (mean over all snapshots), growing up to the date; the legend has the exact counts. Tiny slices get a minimum line width so they stay visible.",
+  indie: "The thermometer shows Indie's cumulative share of all Steam releases; the milestone lines mark 25% and 50% (and the 75% line it has not reached yet).",
+  players: "How many measured games reach each audience size - from 'has any players' to 'averages over 100,000'. Bar lengths are log-scaled, the counts are exact.",
 };
 
 /* Pauze op het einde: 10 s de eindstand vasthouden voordat de cyclus opnieuw begint. */
@@ -94,12 +97,11 @@ const state = {
   chart: "race",
   gamesTotal: 0,
   t0: 0, t1: 0,                 // tijdsbereik (eerste release -> vandaag)
-  years: [],                    // [{year, y0, y1, all:[t], free:[t], indie:[t]}]
-  raceGenres: [],               // top 12: [{name, color, times:[t]}]
-  racePos: null,                // Map(genre-naam -> y) tijdens de race
-  era: null,                    // {days, counts, cum, cells, maxDay}
-  heatBlocks: null,             // per jaar: {bx, by}
-  players: null,                // {buckets:[{label,color,times}], snapT, excluded}
+  years: [],                    // [{year, y0, y1, all:[t], free:[t], indie:[t]}] (f2p)
+  map: null,                    // {genres:[{name,color,dark,times}], cps:[{t,rects}], tagsTotal}
+  spiral: null,                 // {n, x, y, byLevel, size, color, cum, days, years, cx, cy}
+  indie: null,                  // {all:[t], ind:[t], crossings:[t|null]}
+  funnel: null,                 // {tiers:[{label,color,times}], top:{name,value}}
   // playback
   playing: false,
   elapsed: 0,
@@ -174,16 +176,22 @@ function upperBound(arr, v) {
   return lo;
 }
 
-/* Afgeronde rechthoek (boogjes i.p.v. ctx.roundRect, overal bruikbaar). */
-function rrect(ctx, x, y, w, h, r) {
+/* Afgeronde rechthoek als PAD (zonder begin/close, zodat je hem ook in een
+ * groter pad kunt combineren - bv. buis + bol van de thermometer). */
+function rrectPath(ctx, x, y, w, h, r) {
   r = Math.max(0, Math.min(r, w / 2, h / 2));
-  ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
   ctx.arcTo(x + w, y + h, x, y + h, r);
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
+}
+
+/* Afgeronde rechthoek (boogjes i.p.v. ctx.roundRect, overal bruikbaar). */
+function rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  rrectPath(ctx, x, y, w, h, r);
 }
 
 function hexRGB(hex) {
@@ -202,10 +210,30 @@ function rampColor(stops, t) {
   return mixColor(stops[i], stops[i + 1], f - i);
 }
 
-/* Kleur voor de kalender-heatmap: sqrt-schaal zodat kleine aantallen al
+/* Kleurverloop voor de spiraal: sqrt-schaal zodat kleine aantallen al
  * zichtbaar zijn (max = drukste dag). */
 const HEAT_STOPS = ["#2b5a7d", "#3f8fc4", "#8fd0ff", "#ecf9ff"];
-function heatColor(n) { return rampColor(HEAT_STOPS, Math.sqrt(n / state.era.maxDay)); }
+
+/* Donkere of lichte tekst op een tegelkleur? */
+function isDarkText(hex) {
+  const [r, g, b] = hexRGB(hex);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6;
+}
+
+/* Player-funnel: drempels op `average_players` (gemiddelde van alle
+ * momentopnames per game). De eerste rij = alle games met data. */
+const FUNNEL_TIERS = [
+  { label: "ALL MEASURED", color: "#c9d6e2", min: -1 },
+  { label: "\u2265 1", color: "#e35d6a", min: 1 },
+  { label: "\u2265 10", color: "#f4a259", min: 10 },
+  { label: "\u2265 100", color: "#f2d75e", min: 100 },
+  { label: "\u2265 1,000", color: "#7ee081", min: 1000 },
+  { label: "\u2265 10,000", color: "#66c0f4", min: 10000 },
+  { label: "\u2265 100,000", color: "#c9f0ff", min: 100000 },
+];
+
+/* Indie-thermometer: mijlpalen in het cumulatieve aandeel. */
+const INDIE_MILESTONES = [0.25, 0.5, 0.75];
 
 /* =====================================================================
  * Data laden + voorbereiden
@@ -248,18 +276,12 @@ async function loadData() {
     }
     const yearIndex = (t) => Math.min(years.length - 1, Math.max(0, new Date(t).getUTCFullYear() - firstYear));
 
-    const raceMap = new Map();     // genre -> [t...]
-    const dayMap = new Map();      // dag-ms -> aantal
-    const snapT = [];              // releasedatums van games MET snapshots (%-noemer)
-    const playerBuckets = [        // 5 buckets op gemiddelde spelers
-      { label: "0–10", color: "#e35d6a", times: [] },
-      { label: "10–100", color: "#f4a259", times: [] },
-      { label: "100–1,000", color: "#f2d75e", times: [] },
-      { label: "1,000–10,000", color: "#7ee081", times: [] },
-      { label: ">10,000", color: "#66c0f4", times: [] },
-    ];
+    const genreMap = new Map();    // genre -> [t...] (voor de genre-map)
+    const dayMap = new Map();      // dag-ms -> aantal (voor de spiraal)
+    const tierTimes = FUNNEL_TIERS.map(() => []);   // per drempel: [t...]
     let t0 = Infinity;
     let gamesTotal = 0;
+    let topGame = null;            // recordhouder op average_players
 
     for (const g of gameRows) {
       const d = g.release_date_fmt;
@@ -269,9 +291,10 @@ async function loadData() {
       gamesTotal++;
       const ap = parseFloat(g.average_players);
       if (!isNaN(ap)) {
-        snapT.push(t);
-        const bi = ap <= 10 ? 0 : ap <= 100 ? 1 : ap <= 1000 ? 2 : ap <= 10000 ? 3 : 4;
-        playerBuckets[bi].times.push(t);
+        if (!topGame || ap > topGame.value) topGame = { name: g.name, value: ap };
+        for (let k = 0; k < FUNNEL_TIERS.length; k++) {
+          if (ap >= FUNNEL_TIERS[k].min) tierTimes[k].push(t);
+        }
       }
       if (t < t0) t0 = t;
       const Y = years[yearIndex(t)];
@@ -281,8 +304,8 @@ async function loadData() {
       if (gs) {
         for (const name of gs) {
           if (name === "Indie") Y.indie.push(t);
-          let arr = raceMap.get(name);
-          if (!arr) raceMap.set(name, (arr = []));
+          let arr = genreMap.get(name);
+          if (!arr) genreMap.set(name, (arr = []));
           arr.push(t);
         }
       }
@@ -302,37 +325,112 @@ async function loadData() {
       Y.indie.sort((a, b) => a - b);
     }
 
-    // race: top 12 genres op totaal aantal games
-    state.raceGenres = [...raceMap.entries()]
-      .map(([name, times]) => ({ name, color: GENRE_COLORS[name] || "#8ba2b6", times: times.sort((a, b) => a - b) }))
-      .sort((a, b) => b.times.length - a.times.length)
-      .slice(0, 12);
+    /* --- genre-map: top 9 genres + "Other" (alle overige tags samen) --- */
+    const genreList = [...genreMap.entries()]
+      .map(([name, times]) => ({ name, times: times.sort((a, b) => a - b) }))
+      .sort((a, b) => b.times.length - a.times.length);
+    const mapGenres = genreList.slice(0, 9).map((g) => ({
+      name: g.name,
+      color: GENRE_COLORS[g.name] || "#8ba2b6",
+      dark: isDarkText(GENRE_COLORS[g.name] || "#8ba2b6"),
+      times: g.times,
+    }));
+    const otherTimes = [];
+    for (const g of genreList.slice(9)) for (const v of g.times) otherTimes.push(v);
+    otherTimes.sort((a, b) => a - b);
+    mapGenres.push({ name: "Other", color: REST_COLOR, dark: false, times: otherTimes });
+    const tagsTotal = mapGenres.reduce((a, g) => a + g.times.length, 0);
 
-    // heat: era-dagen (eerste release t/m vandaag) + pixelcellen per dag
-    state.heatBlocks = heatLayout(firstYear, lastYear);
-    const days = [], counts = [], cum = [], cells = [];
-    let acc = 0;
+    /* Checkpoints (per maand) met per checkpoint een squarified-treemap-
+       layout, zodat de kaart tussen maanden soepel kan morphen. */
+    const cpTimes = [state.t0];
+    for (let tt = Date.UTC(firstYear, new Date(state.t0).getUTCMonth() + 1, 1); tt < state.t1; tt = nextMonth(tt)) {
+      cpTimes.push(tt);
+    }
+    if (cpTimes[cpTimes.length - 1] !== state.t1) cpTimes.push(state.t1);
+    const cps = cpTimes.map((tt) => ({
+      t: tt,
+      rects: squarify(mapGenres.map((g) => upperBound(g.times, tt)), MAP_AREA.x, MAP_AREA.y, MAP_AREA.w, MAP_AREA.h),
+    }));
+    state.map = { genres: mapGenres, cps, tagsTotal };
+
+    /* --- release-spiraal: 1 ring per jaar, per dag een stip (vast punt) --- */
+    const SP = { cx: 850, cy: 488, r0: 75, perYear: 13.6, levels: 8 };
+    const byLevel = Array.from({ length: SP.levels + 1 }, () => []);
+    const spSize = new Array(SP.levels + 1).fill(0);
+    const spColor = new Array(SP.levels + 1).fill("#000");
+    spSize[0] = 1.6;
+    spColor[0] = "#243a4d";
+    for (let l = 1; l <= SP.levels; l++) {
+      const q = (l - 1) / (SP.levels - 1);
+      spSize[l] = 2.0 + 3.8 * q;
+      spColor[l] = rampColor(HEAT_STOPS, q);
+    }
+    const days = [], counts = [], cum = [], spX = [], spY = [];
+    let acc = 0, maxDay = 1;
     for (let ms = state.t0; ms <= todayMs; ms += 86400000) {
       const n = dayMap.get(ms) || 0;
+      if (n > maxDay) maxDay = n;
       days.push(ms); counts.push(n); acc += n; cum.push(acc);
-      const d = new Date(ms), y = d.getUTCFullYear();
-      const blk = state.heatBlocks[y];
-      const doy = Math.round((ms - Date.UTC(y, 0, 1)) / 86400000);
-      const f = (new Date(Date.UTC(y, 0, 1)).getUTCDay() + 6) % 7;   // ma=0
-      const idx = doy + f;
-      cells.push([blk.bx + Math.floor(idx / 7) * 8, blk.by + (idx % 7) * 8]);
     }
-    let maxDay = 1;
-    for (const n of counts) if (n > maxDay) maxDay = n;
-    state.era = { days, counts, cum, cells, maxDay };
+    for (let i = 0; i < days.length; i++) {
+      const ms = days[i];
+      const d = new Date(ms), y = d.getUTCFullYear();
+      const doy = Math.round((ms - Date.UTC(y, 0, 1)) / 86400000);
+      const diy = (Date.UTC(y + 1, 0, 1) - Date.UTC(y, 0, 1)) / 86400000;
+      const a = (doy / diy) * Math.PI * 2 - Math.PI / 2;
+      const r = SP.r0 + ((y - firstYear) + doy / diy) * SP.perYear;
+      spX.push(Math.round(SP.cx + Math.cos(a) * r));
+      spY.push(Math.round(SP.cy + Math.sin(a) * r));
+      const n = counts[i];
+      const lv = n > 0 ? 1 + Math.min(SP.levels - 1, Math.floor(Math.sqrt(n / maxDay) * SP.levels)) : 0;
+      byLevel[lv].push(i);
+    }
+    const spiralYears = [];
+    for (let y = firstYear + 1; y <= lastYear; y++) spiralYears.push({ year: y, rad: SP.r0 + (y - firstYear) * SP.perYear });
+    state.spiral = { n: days.length, x: spX, y: spY, byLevel, size: spSize, color: spColor,
+                     days, cum, maxDay, years: spiralYears, cx: SP.cx, cy: SP.cy };
 
-    /* players: bucket-arrays sorteren (upperBound vereist oplopende arrays) */
-    snapT.sort((a, b) => a - b);
-    for (const bk of playerBuckets) bk.times.sort((a, b) => a - b);
-    state.players = { buckets: playerBuckets, snapT, excluded: gamesTotal - snapT.length };
+    /* --- indie: cumulatieve share (alle releases vs 'Indie'-tag) + mijlpalen ---
+     * Mijlpalen = BLIJVENDE kruisingen: de eerste datum waarna het aandeel
+     * niet meer onder de drempel zakt (het aandeel begint op ~33%, zakt in de
+     * AAA-jaren naar ~15% en stijgt daarna door naar ~72%). */
+    const indAll = [], indInd = [];
+    for (const Y of years) {
+      for (const v of Y.all) indAll.push(v);
+      for (const v of Y.indie) indInd.push(v);
+    }
+    const crossings = INDIE_MILESTONES.map(() => null);
+    const lastBelow = INDIE_MILESTONES.map(() => null);
+    let ci = 0;
+    while (ci < indAll.length) {
+      const d = indAll[ci];
+      let cj = ci;
+      while (cj < indAll.length && indAll[cj] === d) cj++;
+      const share = upperBound(indInd, d) / cj;
+      for (let k = 0; k < INDIE_MILESTONES.length; k++) {
+        if (share < INDIE_MILESTONES[k]) lastBelow[k] = d;
+      }
+      ci = cj;
+    }
+    for (let k = 0; k < INDIE_MILESTONES.length; k++) {
+      if (lastBelow[k] === null) crossings[k] = indAll[0];          // nooit meer onder geweest
+      else {
+        const idx = upperBound(indAll, lastBelow[k]);               // eerste datum er na
+        crossings[k] = idx < indAll.length ? indAll[idx] : null;
+      }
+    }
+    state.indie = { all: indAll, ind: indInd, crossings };
+
+    /* --- funnel: per drempel de releasedatums (sorteren: upperBound) --- */
+    for (const arr of tierTimes) arr.sort((a, b) => a - b);
+    state.funnel = {
+      tiers: FUNNEL_TIERS.map((tier, i) => ({ label: tier.label, color: tier.color, times: tierTimes[i] })),
+      top: topGame,
+    };
 
     state.years = years;
-    el.dataInfo.textContent = `${fmtInt(gamesTotal)} games · top ${state.raceGenres.length} genres · ${days.length} days · ${fmtInt(snapT.length)} with player data`;
+    el.dataInfo.textContent = `${fmtInt(gamesTotal)} games · ${state.map.genres.length} genre tiles · ${days.length} days · ${fmtInt(state.funnel.tiers[0].times.length)} with player data`;
 
     state.ready = true;
     drawFrame(0, 0);
@@ -348,16 +446,85 @@ async function loadData() {
   }
 }
 
-/* Kalender-layout: 3 kolommen x 8 jaar, per jaar een GitHub-raster
- * (54 weken x 7 dagen, cel 6px + 2px tussenruimte). */
-function heatLayout(firstYear, lastYear) {
-  const out = {};
-  const x0 = 20, y0 = 210, labelW = 70, blockW = 54 * 8, blockH = 56, colGap = 24, rowGap = 12;
-  for (let y = firstYear, i = 0; y <= lastYear; y++, i++) {
-    const col = Math.floor(i / 8), row = i % 8;
-    out[y] = { bx: x0 + col * (labelW + blockW + colGap) + labelW, by: y0 + row * (blockH + rowGap) };
+/* Gebied van de genre-map (treemap). */
+const MAP_AREA = { x: 60, y: 200, w: 1480, h: 590 };
+
+function nextMonth(ms) {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+}
+
+/* Squarified treemap (Bruls e.a.): rechthoeken met een zo vierkant
+ * mogelijke beeldverhouding, in dalende volgorde van waarde. Kleine genres
+ * krijgen een kleine minimum-oppervlakte (anders worden het onleesbare
+ * streepjes); de grote tegels krimpen daardoor ~3% - onmerkbaar. Een te
+ * dunne LAATSTE rij (één klein genre als 1480x6-streep) wordt bij de vorige
+ * rij getrokken - zie MIN_ROW_PX. */
+const MIN_ROW_PX = 55;
+function squarify(vals, x, y, w, h) {
+  const total0 = vals.reduce((a, b) => a + b, 0);
+  const eps = total0 > 0 ? total0 * 0.0035 : 0;
+  const v2 = vals.map((v) => (v > 0 ? v + eps : 0));
+  const total = v2.reduce((a, b) => a + b, 0) || 1;
+  const order = v2.map((v, i) => i).sort((a, b) => v2[b] - v2[a]);
+  const scale = (w * h) / total;
+  const items = order.map((i) => ({ i, a: v2[i] * scale })).filter((it) => it.a > 0);
+
+  /* rijen bepalen (nog niet plaatsen) */
+  const rows = [];
+  let rw = w, rh = h, k = 0;
+  while (k < items.length && rw > 0.01 && rh > 0.01) {
+    const horizontal = rw >= rh;
+    const side = horizontal ? rw : rh;
+    const row = [items[k]];
+    let sum = items[k].a;
+    let best = worstAspect(row, sum, side);
+    while (k + 1 < items.length) {
+      const sum2 = sum + items[k + 1].a;
+      const w2 = worstAspect(row.concat([items[k + 1]]), sum2, side);
+      if (w2 <= best) { row.push(items[k + 1]); sum = sum2; best = w2; k++; }
+      else break;
+    }
+    k++;
+    rows.push({ row, sum, side, horizontal });
+    if (horizontal) rh -= sum / side;
+    else rw -= sum / side;
   }
-  return out;
+  /* flinterdunne laatste rij? samenvoegen met de rij ervoor */
+  while (rows.length > 1 && rows[rows.length - 1].sum / rows[rows.length - 1].side < MIN_ROW_PX) {
+    const last = rows.pop();
+    const prev = rows[rows.length - 1];
+    if (prev.horizontal !== last.horizontal) break;
+    for (const it of last.row) { prev.row.push(it); prev.sum += it.a; }
+  }
+
+  /* rijen plaatsen */
+  const rects = new Array(vals.length).fill(null);
+  let rx = x, ry = y, rw2 = w, rh2 = h;
+  for (const r of rows) {
+    const thick = r.sum / r.side;
+    let off = 0;
+    for (const it of r.row) {
+      const len = it.a / thick;
+      rects[it.i] = r.horizontal
+        ? { x: rx + off, y: ry, w: len, h: thick }
+        : { x: rx, y: ry + off, w: thick, h: len };
+      off += len;
+    }
+    if (r.horizontal) { ry += thick; rh2 -= thick; }
+    else { rx += thick; rw2 -= thick; }
+  }
+  return rects;
+}
+function worstAspect(row, sum, side) {
+  const thick = sum / side;
+  let lo = Infinity, hi = 0;
+  for (const it of row) {
+    const len = it.a / thick;
+    if (len < lo) lo = len;
+    if (len > hi) hi = len;
+  }
+  return Math.max(thick / lo, hi / thick);
 }
 
 /* =====================================================================
@@ -398,139 +565,165 @@ function statBlock(ctx, x, label, value, color) {
 }
 
 /* =====================================================================
- * 1) Genre race
+ * 1) Genre-map (morphing treemap: aandeel van alle genre-tags)
  * ===================================================================== */
-function drawRace(p, dt) {
+function drawMap(p) {
   const ctx = el.canvas.getContext("2d");
   const W = el.canvas.width, H = el.canvas.height;
   clearCanvas(ctx, W, H);
-  drawHeader(ctx, "Steam games per genre — cumulative",
-    "each bar = released games carrying that genre tag (a game can carry several)");
+  drawHeader(ctx, "The map of Steam by genre",
+    "each tile = a genre (the 9 biggest + an 'Other' tile); tile area = its share of all genre tags");
 
-  const t = state.t0 + p * (state.t1 - state.t0);
-  const list = state.raceGenres;
-  const vals = list.map((g) => upperBound(g.times, t));
-  const order = list.map((g, i) => i)
-    .sort((a, b) => vals[b] - vals[a] || list[a].name.localeCompare(list[b].name));
-  const vmax = Math.max(1, vals[order[0]]);
+  const M = state.map, t = state.t0 + p * (state.t1 - state.t0);
 
-  const TOP = 150, BOT = 800, rowH = (BOT - TOP) / list.length, barH = 40;
-  const X0 = 350, MINBAR = 8, MAXLEN = 1080;
+  /* morph tussen de maand-checkpoints heen */
+  const seg = p * (M.cps.length - 1);
+  const ci = Math.min(M.cps.length - 2, Math.floor(seg));
+  const f = seg - ci;
+  const A = M.cps[ci].rects, B = M.cps[ci + 1].rects;
 
-  /* soepele positie-wissels: per frame naar de doelpositie toe bewegen */
-  if (!state.racePos) state.racePos = new Map();
-  const k = dt > 0 ? 1 - Math.exp(-dt / 200) : 0;
-  order.forEach((gi, rank) => {
-    const g = list[gi], target = TOP + rank * rowH;
-    if (!state.racePos.has(g.name)) state.racePos.set(g.name, target);
-    else if (k > 0) state.racePos.set(g.name, state.racePos.get(g.name) + (target - state.racePos.get(g.name)) * k);
-  });
+  const tiles = [];
+  for (let i = 0; i < M.genres.length; i++) {
+    const a = A[i], b = B[i];
+    const r = a && b ? {
+      x: a.x + (b.x - a.x) * f,
+      y: a.y + (b.y - a.y) * f,
+      w: a.w + (b.w - a.w) * f,
+      h: a.h + (b.h - a.h) * f,
+    } : (b || a);
+    if (!r) continue;
+    tiles.push({ g: M.genres[i], r, cnt: upperBound(M.genres[i].times, t) });
+  }
+  /* grootste tegels eerst, kleine erbovenop */
+  tiles.sort((u, v) => v.r.w * v.r.h - u.r.w * u.r.h);
 
-  const items = list.map((g, i) => ({ g, v: vals[i], y: state.racePos.get(g.name) }))
-    .sort((a, b) => a.y - b.y);
+  for (const tl of tiles) {
+    const r = tl.r, g = tl.g, cnt = tl.cnt;
+    if (r.w < 3 || r.h < 3) continue;
+    rrect(ctx, r.x + 2, r.y + 2, r.w - 4, r.h - 4, 8);
+    ctx.fillStyle = cnt > 0 ? g.color : "#1a2735";
+    ctx.fill();
+    if (cnt === 0) continue;      // genre bestaat op deze datum nog niet
 
-  for (const it of items) {
-    const y = it.y + (rowH - barH) / 2;
-    /* genre-naam (rechts uitgelijnd, vóór de balk) */
-    ctx.textAlign = "right";
+    /* labels zo groot als de tegel toelaat */
+    const fs = Math.max(14, Math.min(34, Math.floor(Math.min(r.w * 0.11, r.h * 0.22))));
+    ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.font = "700 24px 'Segoe UI', Arial, sans-serif";
-    ctx.fillStyle = "#dbe7f0";
-    ctx.fillText(it.g.name, 330, y + 28);
-    /* balk */
-    const len = it.v > 0 ? MINBAR + (it.v / vmax) * (MAXLEN - MINBAR) : 0;
-    if (len > 0.5) {
-      rrect(ctx, X0, y, len, barH, 9);
-      ctx.fillStyle = it.g.color;
-      ctx.fill();
+    ctx.fillStyle = g.dark ? "#10202e" : "#eef7ff";
+    ctx.font = `700 ${fs}px 'Segoe UI', Arial, sans-serif`;
+    if (r.w > 80 && r.h > fs + 26 && ctx.measureText(g.name).width <= r.w - 26) {
+      ctx.fillText(g.name, r.x + 14, r.y + 12 + fs);
     }
-    /* waarde */
-    const label = fmtInt(it.v);
-    ctx.font = "700 28px 'Segoe UI', Arial, sans-serif";
-    const tw = ctx.measureText(label).width;
-    let tx = X0 + len + 14, align = "left", color = "#e6eef5";
-    if (tx + tw > 1556 && len > 80) { align = "right"; tx = X0 + len - 12; color = "#0d141d"; }
-    ctx.textAlign = align;
-    ctx.fillStyle = color;
-    ctx.fillText(label, tx, y + 28);
+    if (r.h > fs + 62 && r.w > 110) {
+      ctx.font = `600 ${Math.round(fs * 0.72)}px 'Segoe UI', Arial, sans-serif`;
+      const txt = (cnt >= 1000 ? (cnt / 1000).toFixed(1) + "k" : String(cnt)) + (cnt === 1 ? " game" : " games");
+      ctx.fillText(txt, r.x + 14, r.y + 12 + fs + Math.round(fs * 0.95));
+    }
   }
 
-  /* watermerk rechtsboven: maand + jaar (was: alleen het jaar + een losse
-     regel eronder; gebruikersfix 2026-09-27 — die losse regel overlapte het
-     waarde-label van de bovenste balk; nu één label op de watermerk-plek).
-     Maat streng gemeten: de breedste maand ('September-YYYY' = 1059px @130px)
-     liep achter de ondertitel (eindigt op x=821) — 87px laat ~32px marge;
-     alpha 0,13 zodat het watermerk zelf beter opvalt. Baseline 127: de
-     descender ('p' van September; 20px diep @87px) hing op baseline 150 tot
-     y=170 dwars door de bovenste balk (top y=157) — nu eindigt hij op y=147,
-     10px boven de balk. */
+  /* kop rechtsboven: het grootste genre op dit moment */
+  let lead = null;
+  for (const tl of tiles) if (tl.cnt > 0 && (!lead || tl.cnt > lead.cnt)) lead = tl;
   ctx.textAlign = "right";
-  ctx.font = "800 87px 'Segoe UI', Arial, sans-serif";
-  ctx.fillStyle = "rgba(255,255,255,0.13)";
-  ctx.fillText(fmtMonthYear(t), 1562, 127);
+  ctx.font = "600 20px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = C.muted;
+  ctx.fillText("LEADING GENRE", 1562, 64);
+  ctx.font = "800 46px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = lead ? lead.g.color : C.accent;
+  ctx.fillText(lead ? lead.g.name : "-", 1562, 108);
+  ctx.font = "600 24px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = "#e6eef5";
+  ctx.fillText(lead ? fmtInt(lead.cnt) + " games" : "", 1562, 142);
+  ctx.font = "400 24px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = C.muted;
+  ctx.fillText(fmtMonthYear(t), 1562, 176);
 
-  drawNote(ctx, "cumulative · genre tags by Steam · released games only (up to today)");
+  drawNote(ctx, "tile area = share of " + fmtInt(M.tagsTotal) + " genre tags · a game can carry several tags · 'Other' = all smaller tags · releases up to today");
 }
 
 /* =====================================================================
- * 2) Release-kalender (GitHub-stijl heatmap)
+ * 2) Release-spiraal (1 ring per jaar; elke dag een stip)
  * ===================================================================== */
-function drawHeat(p) {
+function drawSpiral(p) {
   const ctx = el.canvas.getContext("2d");
   const W = el.canvas.width, H = el.canvas.height;
   clearCanvas(ctx, W, H);
-  drawHeader(ctx, "Steam releases per day — 2003 → 2026",
-    "every square is one day; brighter = more releases that day");
+  drawHeader(ctx, "Steam releases — one ring per year",
+    "every dot is one day; January sits at the top");
 
-  const era = state.era, N = era.days.length;
-  const done = Math.floor(p * N);
-  const last = done > 0 ? Math.min(done - 1, N - 1) : -1;
+  const S = state.spiral;
+  const iNow = Math.min(S.n - 1, Math.floor(p * (S.n - 1)));
 
-  /* cellen: nog niet ge-sweept = donker, ge-sweept = gekleurd */
-  for (let i = 0; i < N; i++) {
-    const c = era.cells[i];
-    let fill;
-    if (i < done) fill = era.counts[i] > 0 ? heatColor(era.counts[i]) : "#1d2c3a";
-    else fill = "#0e1722";
-    ctx.fillStyle = fill;
-    ctx.fillRect(c[0], c[1], 6, 6);
+  /* nog niet onthuld: zwakke stippen, zodat de vorm al zichtbaar is */
+  ctx.fillStyle = "#16202c";
+  for (let i = iNow + 1; i < S.n; i++) ctx.fillRect(S.x[i] - 1, S.y[i] - 1, 2, 2);
+
+  /* jaar-spoke + tikken (jan-1 van elk jaar ligt op de verticale lijn) */
+  ctx.strokeStyle = "rgba(199,213,224,0.12)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(S.cx, S.cy);
+  ctx.lineTo(S.cx, S.cy - (S.years[S.years.length - 1].rad + 20));
+  ctx.stroke();
+  const activeYear = new Date(S.days[iNow]).getUTCFullYear();
+  for (const yr of S.years) {
+    const y = S.cy - yr.rad;
+    const active = yr.year === activeYear;
+    ctx.strokeStyle = active ? C.accent : (yr.year % 2 === 0 ? "rgba(199,213,224,0.5)" : "rgba(199,213,224,0.22)");
+    ctx.lineWidth = active ? 2 : 1;
+    ctx.beginPath(); ctx.moveTo(S.cx - 14, y); ctx.lineTo(S.cx - 4, y); ctx.stroke();
   }
 
-  /* actieve cel (witte rand) */
-  if (last >= 0) {
-    const c = era.cells[last];
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(c[0] - 1.5, c[1] - 1.5, 9, 9);
-  }
-
-  /* jaar-labels + actief jaarblok */
-  const curYear = last >= 0 ? new Date(era.days[last]).getUTCFullYear() : null;
-  for (const key in state.heatBlocks) {
-    const blk = state.heatBlocks[key];
-    const active = +key === curYear;
-    ctx.textAlign = "right";
-    ctx.font = active ? "700 22px 'Segoe UI', Arial, sans-serif" : "500 20px 'Segoe UI', Arial, sans-serif";
-    ctx.fillStyle = active ? C.accent : C.muted;
-    ctx.fillText(key, blk.bx - 16, blk.by + 36);
-    if (active) {
-      ctx.strokeStyle = "rgba(102,192,244,0.45)";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(blk.bx - 4, blk.by - 4, 54 * 8 + 8, 7 * 8 + 8);
+  /* onthulde dagen, gebatcht per helderheidsniveau */
+  for (let l = 0; l < S.size.length; l++) {
+    const list = S.byLevel[l];
+    if (!list.length) continue;
+    const s = S.size[l];
+    ctx.fillStyle = S.color[l];
+    for (const i of list) {
+      if (i > iNow) break;
+      ctx.fillRect(S.x[i] - s / 2, S.y[i] - s / 2, s, s);
     }
   }
 
-  /* kop rechts: aantal games + jaar-maand (geen dag-details) */
-  const cum = last >= 0 ? era.cum[last] : 0;
+  /* actieve dag: witte ring + stip */
+  const ax = S.x[iNow], ay = S.y[iNow];
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(ax, ay, 8, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,0.3)";
+  ctx.beginPath(); ctx.arc(ax, ay, 14, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(ax, ay, 3, 0, Math.PI * 2); ctx.fill();
+
+  /* jaar-labels met halo (boven de stippen, anders prikken ze erdoorheen) */
   ctx.textAlign = "right";
+  ctx.lineJoin = "round";
+  for (const yr of S.years) {
+    if (yr.year % 2 !== 0) continue;
+    const y = S.cy - yr.rad + 6;
+    const active = yr.year === activeYear;
+    ctx.font = (active ? "700 18px" : "500 17px") + " 'Segoe UI', Arial, sans-serif";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = C.bg;
+    ctx.strokeText(String(yr.year), S.cx - 22, y);
+    ctx.fillStyle = active ? C.accent : C.muted;
+    ctx.fillText(String(yr.year), S.cx - 22, y);
+  }
+
+  /* kop-stats rechtsboven */
+  ctx.textAlign = "right";
+  ctx.font = "600 20px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = C.muted;
+  ctx.fillText("RELEASES SO FAR", 1562, 64);
   ctx.font = "800 76px 'Segoe UI', Arial, sans-serif";
   ctx.fillStyle = C.accent;
-  ctx.fillText(fmtInt(cum), 1562, 108);
-  ctx.font = "400 26px 'Segoe UI', Arial, sans-serif";
-  ctx.fillStyle = C.muted;
-  ctx.fillText(fmtMonthYear(last >= 0 ? era.days[last] : era.days[0]), 1562, 146);
+  ctx.fillText(fmtInt(S.cum[iNow]), 1562, 140);
+  ctx.font = "600 26px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = "#e6eef5";
+  ctx.fillText(fmtMonthYear(S.days[iNow]), 1562, 178);
 
-  drawNote(ctx, "each square = one day · steam releases 2003 → today · counter follows the sweep");
+  drawNote(ctx, "each dot = one day · each ring = one year · brighter = more releases that day");
 }
 
 /* =====================================================================
@@ -672,202 +865,237 @@ function donutCallout(ctx, cx, cy, r, a, text, color) {
 }
 
 /* =====================================================================
- * 4) Indie takeover (100%-ribbon per jaar)
+ * 4) Indie takeover (thermometer met het cumulatieve Indie-aandeel)
  * ===================================================================== */
 function drawIndie(p) {
   const ctx = el.canvas.getContext("2d");
   const W = el.canvas.width, H = el.canvas.height;
   clearCanvas(ctx, W, H);
   drawHeader(ctx, "How Indie took over Steam",
-    "Indie share of new releases per year (Steam 'Indie' genre tag)");
+    "Indie's cumulative share of all Steam releases — the thin line traces the history up to the shown date");
 
   const t = state.t0 + p * (state.t1 - state.t0);
-  const years = state.years;
-  const x0 = 120, x1 = 1560, yTop = 210, yBot = 780;
-  const colH = yBot - yTop;
-  const slot = (x1 - x0) / years.length;
-  const barW = 42;
-  let sIndie = 0, sAll = 0;
-  let crossCx = null, crossOn = false;
+  const D = state.indie;
+  const sAll = upperBound(D.all, t), sInd = upperBound(D.ind, t);
+  const share = sAll ? sInd / sAll : 0;
 
-  for (let i = 0; i < years.length; i++) {
-    const Y = years[i];
-    const cx = x0 + slot * (i + 0.5);
-    const bx = cx - barW / 2;
-    if (t < Y.y0) {
-      ctx.fillStyle = "#131d29";
-      ctx.fillRect(bx, yTop, barW, colH);
-      continue;
-    }
-    const cap = Math.min(t, Y.y1 - 1);
-    const nAll = upperBound(Y.all, cap);
-    const nInd = upperBound(Y.indie, cap);
-    sAll += nAll;
-    sIndie += nInd;
-    if (nAll === 0) {
-      ctx.fillStyle = "#131d29";
-      ctx.fillRect(bx, yTop, barW, colH);
-      continue;
-    }
-    const share = nInd / nAll;
-    const split = yBot - share * colH;
-    ctx.fillStyle = REST_COLOR;
-    ctx.fillRect(bx, yTop, barW, split - yTop);
-    ctx.fillStyle = INDIE_COLOR;
-    ctx.fillRect(bx, split, barW, yBot - split);
-    /* percentage boven de kolom */
-    ctx.textAlign = "center";
-    ctx.font = share > 0.5 ? "700 22px 'Segoe UI', Arial, sans-serif" : "600 22px 'Segoe UI', Arial, sans-serif";
-    ctx.fillStyle = share > 0.5 ? INDIE_COLOR : "#c7d5e0";
-    ctx.fillText(Math.round(share * 100) + "%", cx, yTop - 12);
-    if (Y.year === 2012 && share > 0.5 && crossCx === null) { crossCx = cx; crossOn = true; }
+  /* thermometer: buis + bol als één pad (clip + rand) */
+  const tubeX = 560, tubeW = 200, tubeTop = 150, tubeBot = 700;
+  const colH = tubeBot - tubeTop;
+  const bulbCx = tubeX + tubeW / 2, bulbCy = 760, bulbR = 95;
+  const levelY = tubeBot - share * colH;
+  const bulbBottom = bulbCy + bulbR;
+
+  function thermoPath() {
+    rrectPath(ctx, tubeX, tubeTop, tubeW, tubeBot - tubeTop, tubeW / 2);
+    ctx.moveTo(bulbCx + bulbR, bulbCy);
+    ctx.arc(bulbCx, bulbCy, bulbR, 0, Math.PI * 2);
   }
 
-  /* mijlpaal: het eerste jaar met een Indie-meerderheid */
-  if (crossOn) {
-    ctx.strokeStyle = "rgba(126,224,129,0.55)";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 6]);
-    ctx.beginPath(); ctx.moveTo(crossCx, yTop - 26); ctx.lineTo(crossCx, yBot + 12); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = INDIE_COLOR;
-    ctx.beginPath(); ctx.arc(crossCx, yTop - 30, 5, 0, Math.PI * 2); ctx.fill();
-  }
+  /* donkere basis */
+  ctx.beginPath();
+  thermoPath();
+  ctx.fillStyle = "#141f2b";
+  ctx.fill();
 
-  /* jaar-labels (2004..2026, stap 2) */
-  ctx.textAlign = "center";
-  ctx.font = "500 20px 'Segoe UI', Arial, sans-serif";
-  for (let i = 1; i < years.length; i += 2) {
-    ctx.fillStyle = years[i].year === 2012 && crossOn ? INDIE_COLOR : C.muted;
-    ctx.fillText(String(years[i].year), x0 + slot * (i + 0.5), yBot + 34);
-  }
+  /* kwik binnen de clip: bol gevuld + kolom met golvend oppervlak */
+  ctx.save();
+  ctx.beginPath();
+  thermoPath();
+  ctx.clip();
 
-  /* kop-stats: cumulatief Indie-aandeel */
-  const share = sAll ? sIndie / sAll : 0;
-  ctx.textAlign = "right";
-  ctx.font = "800 76px 'Segoe UI', Arial, sans-serif";
   ctx.fillStyle = INDIE_COLOR;
-  ctx.fillText((share * 100).toFixed(1) + "%", 1562, 108);
-  ctx.font = "400 25px 'Segoe UI', Arial, sans-serif";
-  ctx.fillStyle = C.muted;
-  ctx.fillText("of all released Steam games are Indie", 1562, 146);
-  ctx.font = "500 23px 'Segoe UI', Arial, sans-serif";
-  ctx.fillStyle = "#c7d5e0";
-  ctx.fillText(`${fmtInt(sIndie)} Indie · ${fmtInt(sAll)} total`, 1562, 180);
+  ctx.beginPath();
+  ctx.arc(bulbCx, bulbCy, bulbR - 4, 0, Math.PI * 2);
+  ctx.fill();
 
-  drawNote(ctx, "Indie = games carrying Steam's 'Indie' genre tag · releases up to today");
+  const wave = (xi) => levelY
+    + Math.sin(xi / 34 + p * Math.PI * 2 * 5) * 3.5
+    + Math.sin(xi / 17 - p * Math.PI * 2 * 3) * 1.8;
+  const wx0 = tubeX - 6, wx1 = tubeX + tubeW + 6;
+  ctx.beginPath();
+  ctx.moveTo(wx0, wave(wx0));
+  for (let xi = wx0; xi <= wx1; xi += 4) ctx.lineTo(xi, wave(xi));
+  ctx.lineTo(wx1, bulbBottom + 10);
+  ctx.lineTo(wx0, bulbBottom + 10);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, levelY, 0, bulbBottom);
+  grad.addColorStop(0, "#9aefa0");
+  grad.addColorStop(1, "#57bb63");
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  /* oppervlakte-lijn */
+  ctx.beginPath();
+  ctx.moveTo(wx0, wave(wx0));
+  for (let xi = wx0; xi <= wx1; xi += 4) ctx.lineTo(xi, wave(xi));
+  ctx.strokeStyle = "rgba(255,255,255,0.45)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  /* historie-sparkline: het cumulatieve aandeel als dun lijntje (de dip
+     in de vroege AAA-jaren + de klim naar vandaag); groeit mee met de tijd */
+  ctx.beginPath();
+  const nSteps = 220;
+  for (let i = 0; i <= nSteps; i++) {
+    const f = (i / nSteps) * p;                     // alleen het verstreken deel
+    const tt = state.t0 + f * (state.t1 - state.t0);
+    const a = upperBound(D.all, tt);
+    const sh = a ? upperBound(D.ind, tt) / a : 0;
+    const xx = tubeX + 14 + f * (tubeW - 28);
+    const yy = tubeBot - sh * colH;
+    if (i === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+  }
+  ctx.strokeStyle = "rgba(255,255,255,0.45)";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  /* bubbels in het kwik */
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
+  for (let i = 0; i < 9; i++) {
+    const prog = (p * (2.2 + i * 0.35) + i * 0.137) % 1;
+    const bx = tubeX + 26 + ((i * 71) % (tubeW - 52)) + Math.sin(p * Math.PI * 2 * 2 + i) * 5;
+    const by = bulbBottom - 20 - prog * (bulbBottom - 20 - levelY);
+    if (by < levelY + 8) continue;
+    ctx.beginPath();
+    ctx.arc(bx, by, 2.5 + (i % 3), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /* mijlpaal-lijnen binnen de buis */
+  for (const m of INDIE_MILESTONES) {
+    const y = tubeBot - m * colH;
+    ctx.strokeStyle = "rgba(255,255,255,0.30)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath(); ctx.moveTo(tubeX, y); ctx.lineTo(tubeX + tubeW, y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.restore();
+
+  /* buis-rand */
+  ctx.beginPath();
+  thermoPath();
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  /* mijlpaal-labels links + tikje naar de buis */
+  for (let k = 0; k < INDIE_MILESTONES.length; k++) {
+    const m = INDIE_MILESTONES[k], y = tubeBot - m * colH;
+    const reached = D.crossings[k] !== null && t >= D.crossings[k];
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(530, y); ctx.lineTo(tubeX, y); ctx.stroke();
+    ctx.textAlign = "right";
+    ctx.font = "700 24px 'Segoe UI', Arial, sans-serif";
+    ctx.fillStyle = reached ? INDIE_COLOR : C.muted;
+    ctx.fillText(Math.round(m * 100) + "%", 516, y + 4);
+    ctx.font = "500 17px 'Segoe UI', Arial, sans-serif";
+    ctx.fillStyle = reached ? "#9aefa0" : C.muted;
+    const sub = D.crossings[k] === null ? "not reached yet" : (reached ? fmtMonthYear(D.crossings[k]) : "not yet");
+    ctx.fillText(sub, 516, y + 26);
+  }
+
+  /* groot percentage dat met het kwik mee omhoog kruipt */
+  const px = tubeX + tubeW + 62;
+  ctx.textAlign = "left";
+  const pctTxt = (100 * share).toFixed(1);
+  ctx.font = "800 130px 'Segoe UI', Arial, sans-serif";
+  const numW = ctx.measureText(pctTxt).width;
+  ctx.fillStyle = "#e6eef5";
+  ctx.fillText(pctTxt, px, levelY + 44);
+  ctx.fillStyle = INDIE_COLOR;
+  ctx.fillText("%", px + numW + 6, levelY + 44);
+  ctx.font = "600 24px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = "#c7d5e0";
+  ctx.fillText(`${fmtInt(sInd)} Indie of ${fmtInt(sAll)} games`, px, levelY + 88);
+
+  /* maand-jaar rechtsboven */
+  ctx.textAlign = "right";
+  ctx.font = "600 26px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = C.muted;
+  ctx.fillText(fmtMonthYear(t), 1562, 64);
+
+  drawNote(ctx, "Indie = Steam's 'Indie' genre tag · cumulative share of all releases");
 }
 
 /* =====================================================================
- * 5) Spelersverdeling (5 buckets op gemiddelde spelers; cirkeldiagram)
+ * 5) Player-funnel (hoeveel games bereiken welke spelerstand?)
  * ===================================================================== */
-function drawPlayers(p) {
+function drawFunnel(p) {
   const ctx = el.canvas.getContext("2d");
   const W = el.canvas.width, H = el.canvas.height;
-  const t = state.t0 + p * (state.t1 - state.t0);
-  const P = state.players;
-  const counts = P.buckets.map((b) => upperBound(b.times, t));
-  const measured = upperBound(P.snapT, t);
-  const total = counts.reduce((a, b) => a + b, 0);
-
   clearCanvas(ctx, W, H);
-  drawHeader(ctx, "Steam games by average player count",
-    "every game with player snapshots, bucketed by its average player count · the pie grows up to the date");
 
-  /* cirkeldiagram: de 4 kleine punten liggen onderaan gecentreerd (a0 schuift
-     mee met hun totale hoek), zodat hun dunne lijntjes nergens botsen */
-  const cx = 520, cy = 470, r = 270;
-  const angs = counts.map((n) => (total > 0 ? (Math.PI * 2 * n) / total : 0));
-  const smallAng = angs.slice(1).reduce((a, b) => a + b, 0);
-  const a0 = Math.PI / 2 + smallAng / 2;
+  const F = state.funnel;
+  const nm = F.top ? (F.top.name.length > 26 ? F.top.name.slice(0, 25) + "\u2026" : F.top.name) : null;
+  const rec = F.top ? ` - the biggest is ${nm} with ${fmtInt(Math.round(F.top.value))} average players` : "";
+  drawHeader(ctx, "How many games reach how many players",
+    "average concurrent players per game (mean of all collected snapshots)" + rec);
 
-  if (total === 0) {
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.strokeStyle = C.axis; ctx.lineWidth = 2; ctx.stroke();
-  } else {
-    let a = a0;
-    for (let i = 0; i < P.buckets.length; i++) {
-      const b = P.buckets[i], ang = angs[i];
-      if (ang > 0) {
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, r, a, a + ang);
-        ctx.closePath();
-        ctx.fillStyle = b.color;
-        ctx.fill();
-        /* hairline-punten (< ~3°) als zichtbaar kleurlijntje op de rand */
-        if (ang < 0.05) {
-          ctx.beginPath();
-          ctx.arc(cx, cy, r - 3, a, a + ang);
-          ctx.strokeStyle = b.color;
-          ctx.lineWidth = 5;
-          ctx.stroke();
-        }
-      }
-      a += ang;
-    }
-    /* groot %-label IN het dominante stuk (donkere tekst = leesbaar op rood) */
-    if (angs[0] >= 1.0) {
-      const mid = a0 + angs[0] / 2;
-      const lx = cx + Math.cos(mid) * r * 0.56;
-      const ly = cy + Math.sin(mid) * r * 0.56;
-      ctx.textAlign = "center";
-      ctx.font = "800 84px 'Segoe UI', Arial, sans-serif";
-      ctx.fillStyle = "#0f1a26";
-      ctx.fillText((100 * counts[0] / total).toFixed(1) + "%", lx, ly + 12);
-      ctx.font = "600 26px 'Segoe UI', Arial, sans-serif";
-      ctx.fillStyle = "rgba(15,26,38,0.85)";
-      ctx.fillText(fmtInt(counts[0]) + " games", lx, ly + 54);
-    }
-  }
+  const t = state.t0 + p * (state.t1 - state.t0);
+  const counts = F.tiers.map((ti) => upperBound(ti.times, t));
+  const measured = Math.max(1, counts[0]);
+  const logMax = Math.log10(measured + 1);
 
-  /* legenda rechts: kleur + bucket + % + aantal (live meegeteld) */
-  for (let i = 0; i < P.buckets.length; i++) {
-    const b = P.buckets[i], y = 250 + i * 90;
-    const pct = total > 0 ? (100 * counts[i] / total) : 0;
-    rrect(ctx, 950, y - 22, 26, 26, 6);
-    ctx.fillStyle = b.color;
-    ctx.fill();
-    ctx.textAlign = "left";
-    ctx.font = "600 28px 'Segoe UI', Arial, sans-serif";
-    ctx.fillStyle = "#dbe7f0";
-    ctx.fillText(b.label, 992, y);
-    ctx.textAlign = "right";
-    ctx.font = "800 30px 'Segoe UI', Arial, sans-serif";
-    ctx.fillStyle = b.color;
-    ctx.fillText(pct.toFixed(1) + "%", 1330, y);
-    ctx.font = "600 26px 'Segoe UI', Arial, sans-serif";
-    ctx.fillStyle = "#e6eef5";
-    ctx.fillText(fmtInt(counts[i]), 1560, y);
-  }
+  const X0 = 330, X1 = 1330, rowTop = 190, rowH = 96, barH = 56;
+  const maxW = X1 - X0;
 
-  /* kop-stats rechtsboven */
   ctx.textAlign = "right";
-  ctx.font = "600 20px 'Segoe UI', Arial, sans-serif";
+  ctx.font = "600 18px 'Segoe UI', Arial, sans-serif";
   ctx.fillStyle = C.muted;
-  ctx.fillText("GAMES MEASURED", 1560, 64);
-  ctx.font = "800 46px 'Segoe UI', Arial, sans-serif";
-  ctx.fillStyle = "#e6eef5";
-  ctx.fillText(fmtInt(measured), 1560, 108);
-  ctx.font = "400 26px 'Segoe UI', Arial, sans-serif";
-  ctx.fillStyle = C.muted;
-  ctx.fillText(fmtMonthYear(t), 1560, 146);
+  ctx.fillText("AVG PLAYERS", 300, rowTop - 18);
 
-  drawNote(ctx, "average players = mean of all collected snapshots · " +
-    fmtInt(P.excluded) + " games without snapshots are excluded · tiny slices get a minimum line width");
+  for (let i = 0; i < F.tiers.length; i++) {
+    const tier = F.tiers[i], cnt = counts[i];
+    const yc = rowTop + i * rowH + barH / 2;
+    /* log-schaal: 100.000 vs 7 games blijft in één beeld zichtbaar */
+    const frac = Math.log10(cnt + 1) / logMax;
+    const len = 70 + frac * (maxW - 70);
+    rrect(ctx, X0, yc - barH / 2, maxW, barH, 12);
+    ctx.fillStyle = "#16212d";
+    ctx.fill();
+    rrect(ctx, X0, yc - barH / 2, len, barH, 12);
+    ctx.fillStyle = tier.color;
+    ctx.fill();
+    /* linkerkolom: drempel */
+    ctx.textAlign = "right";
+    ctx.font = i === 0 ? "700 26px 'Segoe UI', Arial, sans-serif" : "700 30px 'Segoe UI', Arial, sans-serif";
+    ctx.fillStyle = tier.color;
+    ctx.fillText(tier.label, 300, yc + 10);
+    /* rechts: aantal + percentage */
+    ctx.font = "800 44px 'Segoe UI', Arial, sans-serif";
+    ctx.fillStyle = tier.color;
+    ctx.fillText(fmtInt(cnt), 1560, yc + 8);
+    ctx.font = "500 22px 'Segoe UI', Arial, sans-serif";
+    ctx.fillStyle = C.muted;
+    const pct = cnt / measured;
+    const pctTxt = i === 0 ? "measured games"
+      : (pct < 0.0005 ? "<0.1%" : (100 * pct).toFixed(1) + "%") + " of measured";
+    ctx.fillText(pctTxt, 1560, yc + 38);
+  }
+
+  /* maand-jaar rechtsboven */
+  ctx.textAlign = "right";
+  ctx.font = "600 26px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = C.muted;
+  ctx.fillText(fmtMonthYear(t), 1562, 64);
+
+  drawNote(ctx, "average players = mean of all collected snapshots · bar length is log-scaled · games without player data are excluded");
 }
 
 /* =====================================================================
  * Afspelen
  * ===================================================================== */
 function drawFrame(p, dt) {
-  if (!state.ready && state.chart !== "race") return;
+  if (!state.ready) return;
   switch (state.chart) {
-    case "race": drawRace(p, dt || 0); break;
-    case "heat": drawHeat(p); break;
+    case "map": drawMap(p); break;
+    case "spiral": drawSpiral(p); break;
     case "f2p": drawF2P(p); break;
     case "indie": drawIndie(p); break;
-    case "players": drawPlayers(p); break;
+    case "players": drawFunnel(p); break;
   }
 }
 
@@ -900,7 +1128,6 @@ function activateChart(key) {
   el.durVal.value = CHARTS[key].dur;
   state.elapsed = 0;
   state.pauseP = 0;
-  state.racePos = null;
   if (state.ready) drawFrame(0, 0);
 }
 
@@ -921,7 +1148,6 @@ function bindControls() {
     if (state.recording || !state.ready) return;
     state.elapsed = 0;
     state.pauseP = 0;
-    state.racePos = null;
     drawFrame(0, 0);
   });
   el.durSlider.addEventListener("input", () => {
@@ -983,7 +1209,6 @@ function startExport() {
   state.playing = true;           // animatie draait tijdens opname
   state.elapsed = 0;
   state.lastTs = 0;
-  state.racePos = null;           // race begint netjes vooraan
   state.chunks = [];
   setPlayUI();
 
@@ -1066,5 +1291,5 @@ function finalizeExport() {
  * ===================================================================== */
 requestAnimationFrame(loop);
 bindControls();
-activateChart("race");
+activateChart("map");
 loadData();
