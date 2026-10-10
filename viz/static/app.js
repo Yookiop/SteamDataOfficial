@@ -21,6 +21,14 @@
  *   oude/nieuwe gridlabels) i.p.v. een harde sprong. Aan het einde houdt
  *   elke animatie 10 s de eindstand vast (`END_PAUSE_MS`) voordat de
  *   cyclus opnieuw begint.
+ * - De teller loopt VLOEIEND tussen twee releasedatums (`smoothCount`):
+ *   in de vroege jaren is één release nog ~4% van de y-as, dus zonder die
+ *   interpolatie "hapt" het begin van de animatie (zichtbare hops van
+ *   ~20 px, terwijl er tussendoor niets beweegt). Op elke releasedatum is
+ *   de waarde exact het cumulatieve aantal en op het eindframe het totaal.
+ *   De per-jaar-as heeft daarnaast een vangnet: max(zoomwaarde, hoogste
+ *   kolom * 1.03) — de as zoomt vertraagd, waardoor een kolom anders
+ *   boven de plot uitsteekt en over de titel/kop heen getekend wordt.
  * - MP4-export: canvas.captureStream + MediaRecorder, download van een
  *   volledige cyclus (geen ffmpeg nodig, zoals Backgrounds).
  * - Filter: alleen releasedatums t/m vandaag (einddatum = vandaag).
@@ -50,8 +58,10 @@ const chartColors = {
 
 /* Stijl van de x-/y-aswaarden (ticklabels) + y-as-label (bv. Amount).
  * Instelbaar op de pagina en GEDEELD: elke grafiek (ook toekomstige)
- * gebruikt deze waarden via axisFont()/axis.color/axis.yLabel. */
-const axis = { size: 20, bold: false, color: C.text, yLabel: true };
+ * gebruikt deze waarden via axisFont()/axis.color/axis.yLabel.
+ * Het y-as-label staat standaard UIT (vraag 2026-10-10): de grote teller
+ * met zijn bijschrift ("Games released in <jaar>") zegt al genoeg. */
+const axis = { size: 20, bold: false, color: C.text, yLabel: false };
 function axisFont() {
   return `${axis.bold ? 700 : 500} ${axis.size}px 'Segoe UI', Arial, sans-serif`;
 }
@@ -277,19 +287,41 @@ function upperBound(arr, v) {
   return lo;
 }
 
-/* Aantal games met een releasedatum t/m t (state.relTimes is oplopend). */
+/* Aantal games met een releasedatum t/m t (state.relTimes is oplopend).
+ * Let op: de grafieken gebruiken de VLOEIENDE versie (smoothCount); deze
+ * exacte telling blijft alleen staan als referentie/controle. */
 function cumCount(t) {
   const i = upperBound(state.relTimes, t);
   return i > 0 ? state.relCounts[i - 1] : 0;
 }
 
+/* Vloeiende teller op tijdstip t: tussen twee opeenvolgende releasedatums
+ * loopt het cumulatieve aantal gelijkmatig mee met de tijd i.p.v. per
+ * release te springen. In de vroege jaren is één release ~4% van de y-as,
+ * dus die sprongen zijn goed zichtbaar (het "happeren" van het begin);
+ * later is één release minder dan een pixel. Op elke releasedatum is de
+ * waarde exact het cumulatieve aantal, en na de laatste release blijft de
+ * waarde staan — het eindframe toont dus exact het totaal. */
+function smoothCount(t) {
+  const ts = state.relTimes, cs = state.relCounts;
+  const i = upperBound(ts, t);                 // # releases met tijd <= t
+  if (i === 0) return 0;
+  if (i >= ts.length) return cs[cs.length - 1];
+  const t0 = ts[i - 1], t1 = ts[i];
+  const f = t1 > t0 ? (t - t0) / (t1 - t0) : 1;
+  return cs[i - 1] + (cs[i] - cs[i - 1]) * f;
+}
+
 /* Kolomwaarden van de per-jaar-grafiek op tijdstip t: afgeronde jaren hun
  * totaal, het LOPENDE jaar alleen wat er tot t is uitgekomen (zo groeit die
  * kolom mee met de cursor). `max` = de hoogste kolom op dat moment, voor de
- * dynamische y-as. */
+ * dynamische y-as; `total` = het cumulatieve aantal t/m t (de grote teller
+ * in de kop toont dat totaal, niet meer het jaar). De waarde van het lopende
+ * jaar komt uit smoothCount, dus de kolom groeit vloeiend i.p.v. met één
+ * sprong per release. */
 function yearValuesAt(t) {
   const rows = state.yearly;
-  const cum = cumCount(t);
+  const cum = smoothCount(t);
   const curYear = new Date(t).getUTCFullYear();
   const vals = new Array(rows.length);
   let max = 0;
@@ -302,7 +334,7 @@ function yearValuesAt(t) {
     vals[i] = v;
     if (v > max) max = v;
   }
-  return { vals, max, curYear };
+  return { vals, max, curYear, total: cum };
 }
 
 /* =====================================================================
@@ -472,7 +504,7 @@ function drawTimeline(p) {
   /* Tijdcursor */
   const tCur = st.tMin + p * (st.tMax - st.tMin);
   const idx = upperBound(st.relTimes, tCur);   // # releases met tijd <= cursor
-  const curCount = idx > 0 ? st.relCounts[idx - 1] : 0;
+  const curCount = smoothCount(tCur);          // vloeiend (geen hops per release)
 
   /* Dynamische y-as: schaalt mee met de huidige teller in GROVE stappen
    * (Y_STEPS: 1000 → 10.000 → 50.000 → ...) met ~5% kopruimte; minimum
@@ -480,11 +512,19 @@ function drawTimeline(p) {
    * ZOOMT de as ~1,2 s vloeiend naar de nieuwe bovengrens (smoothstep)
    * i.p.v. een harde sprong. */
   const transW = Y_TRANS_MS / anims.timeline.durMs;   // vensterbreedte in p-eenheden
-  const trans = yTransitionAt(mergeYTrans(st.yTrans, transW), p);
+  const ySteps = mergeYTrans(st.yTrans, transW);
+  const trans = yTransitionAt(ySteps, p);
   const transE = trans ? Math.min(1, (p - trans.p) / transW) : 0;
-  let ymax = trans
+  /* Vóór de eerste wissel geldt de eerste (vaste) stap uit de keten — niet
+   * de stap die de teller op dat moment zou vragen: die ligt bij een
+   * vloeiende teller soms al één stap voor, waardoor de as zou springen en
+   * de wissel daarna weer terugzoomen (zichtbare flikkering). */
+  const zoomed = trans
     ? trans.from + (trans.to - trans.from) * (transE * transE * (3 - 2 * transE))
-    : yCeil(curCount * 1.05);
+    : (ySteps.length ? ySteps[0].from : yCeil(curCount * 1.05));
+  /* Vangnet: de as zakt nooit onder de teller (de teller groeit sneller dan
+   * de as zoomt). max() blijft continu bij een stapwissel, dus geen sprong. */
+  const ymax = Math.max(zoomed, curCount * 1.03);
   const Y = (v) => y0 + ph - (v / ymax) * ph;
 
   /* Y-grid + labels — tijdens een overgang cross-faden de tickwaarden van
@@ -602,7 +642,7 @@ function drawTimeline(p) {
   ctx.textAlign = "left";
   ctx.fillStyle = chartColors.timeline.line;
   ctx.font = "800 88px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(fmtInt(curCount), x0, 168);
+  ctx.fillText(fmtInt(Math.round(curCount)), x0, 168);
   ctx.font = "500 35px 'Segoe UI', Arial, sans-serif";
   ctx.fillStyle = C.muted;
   ctx.fillText("Games released up to " + fmtMonthYear(tCur), x0, 212);
@@ -640,7 +680,7 @@ function drawYearly(p) {
 
   /* Kolomwaarden bij de cursor + de hoogste kolom (voor de y-as) */
   const tCur = st.tMin + p * (st.tMax - st.tMin);
-  const { vals, max, curYear } = yearValuesAt(tCur);
+  const { vals, max, total } = yearValuesAt(tCur);
 
   /* Dynamische y-as: kleinste per-jaar-stap ≥ hoogste kolom; bij een
    * stapwissel zoomt de as ~1,2 s vloeiend (smoothstep) i.p.v. een harde
@@ -648,11 +688,21 @@ function drawYearly(p) {
    * en 8% kopruimte zodat het getal boven de hoogste kolom vrij blijft
    * van de teller boven de grafiek. */
   const transW = Y_TRANS_MS / anims.yearly.durMs;
-  const trans = yTransitionAt(mergeYTrans(st.yearlyTrans, transW), p);
+  const ySteps = mergeYTrans(st.yearlyTrans, transW);
+  const trans = yTransitionAt(ySteps, p);
   const e = trans ? Math.min(1, (p - trans.p) / transW) : 0;
-  const ymax = trans
+  /* Vóór de eerste wissel geldt de eerste (vaste) stap uit de keten — niet
+   * de stap die de hoogste kolom op dat moment zou vragen: bij een vloeiende
+   * kolom ligt die soms al één stap voor, waardoor de as zou springen en de
+   * wissel daarna weer terugzoomen (zichtbare flikkering). */
+  const zoomed = trans
     ? trans.from + (trans.to - trans.from) * (e * e * (3 - 2 * e))
-    : yearYCeil(max * 1.08);
+    : (ySteps.length ? ySteps[0].from : yearYCeil(max * 1.08));
+  /* Vangnet: tijdens een zoom loopt de as vertraagd mee (de kolommen groeien
+   * sneller dan de as zoomt), waardoor een kolom anders boven de plot
+   * uitsteekt en over de titel/kop heen getekend wordt. max() houdt de as
+   * continu bij een stapwissel, dus geen sprong. */
+  const ymax = Math.max(zoomed, max * 1.03);
   const Y = (v) => y0 + ph - (v / ymax) * ph;
 
   /* Y-as-label "Amount" (geroteerd) - verbergbaar met de Y-label-toggle */
@@ -701,7 +751,7 @@ function drawYearly(p) {
   const n = rows.length;
   const slot = pw / n;
   const barW = slot * 0.62;
-  const nums = vals.map(fmtInt);
+  const nums = vals.map((v) => fmtInt(Math.round(v)));
   let numSize = 26;
   ctx.font = `600 ${numSize}px 'Segoe UI', Arial, sans-serif`;
   let numW = Math.max(...nums.map((t) => ctx.measureText(t).width));
@@ -724,37 +774,34 @@ function drawYearly(p) {
     ctx.fillText(nums[i], x0 + slot * (i + 0.5), Y(vals[i]) - 14);
   }
 
-  /* Jaarlabels onder de as: met zoveel kolommen kunnen ze bij een grote
-   * Axis-grootte overlappen, dus alleen labels die ruim genoeg uit elkaar
-   * staan; het laatste jaar staat er altijd bij. */
+  /* Jaarlabels onder de as: ALTIJD één label per jaar. Bij een grote
+   * Axis-grootte passen 24 jaartallen niet naast elkaar, dus krimpt alleen
+   * deze labelrij mee (net als de getallen boven de kolommen) zodat elk
+   * jaar er toch staat. */
   ctx.fillStyle = axis.color;
   ctx.font = axisFont();
   ctx.textAlign = "center";
-  const yearW = ctx.measureText(String(rows[n - 1].year)).width;
-  const gap = yearW + 14;
-  const show = [];
-  let lastX = -Infinity;
+  const lastYearText = String(rows[n - 1].year);
+  const yearMaxW = ctx.measureText(lastYearText).width;
+  if (yearMaxW > slot - 6) {
+    const yearSize = Math.max(10, Math.floor(axis.size * (slot - 6) / yearMaxW));
+    ctx.font = `${axis.bold ? 700 : 500} ${yearSize}px 'Segoe UI', Arial, sans-serif`;
+  }
   for (let i = 0; i < n; i++) {
-    const cx = x0 + slot * (i + 0.5);
-    if (cx - lastX >= gap) { show.push(i); lastX = cx; }
-  }
-  if (show[show.length - 1] !== n - 1) {
-    if (x0 + slot * (n - 0.5) - lastX < gap) show.pop();
-    show.push(n - 1);
-  }
-  for (const i of show) {
     ctx.fillText(String(rows[i].year), x0 + slot * (i + 0.5), y0 + ph + 38);
   }
 
-  /* Grote teller + jaar (in de kop boven de plot): het aantal van het jaar
-   * waar de cursor staat (groeit mee binnen dat jaar). */
+  /* Grote teller (in de kop boven de plot): het TOTALE aantal games t/m de
+   * cursor, zonder jaartal (vraag 2026-10-10) — het getal loopt mee van 0 tot
+   * het eindtotaal en is daarmee duidelijk zonder dat er een jaar bij hoeft;
+   * de verdeling per jaar zit al in de kolommen. */
   ctx.textAlign = "left";
   ctx.fillStyle = chartColors.yearly.color;
   ctx.font = "800 88px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(fmtInt(vals[Math.max(0, curYear - rows[0].year)] ?? 0), x0, 168);
+  ctx.fillText(fmtInt(Math.round(total)), x0, 168);
   ctx.font = "500 35px 'Segoe UI', Arial, sans-serif";
   ctx.fillStyle = C.muted;
-  ctx.fillText("Games released in " + curYear, x0, 212);
+  ctx.fillText("Games released", x0, 212);
 }
 
 /* =====================================================================
