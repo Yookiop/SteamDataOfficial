@@ -563,34 +563,40 @@ gewijzigd).
 
 ## Visualisatie (`viz/` — HTML-app, Backgrounds-stijl)
 
-In `viz/` staat een HTML-app die de grafieken van de CSV's in `data/` in de
-browser toont (geen GIF — de animatie speelt live af en je exporteert een
-**MP4**):
+In `viz/` staat een HTML-app met **twee geanimeerde grafieken** van de CSV in
+`data/` (geen GIF — de animatie speelt live af en je exporteert een **MP4**).
+Elke grafiek heeft zijn **eigen** ▶ Play/pause, ⟲ Restart, instelbare
+**Duration** (10–120 s) en **⬇ Export MP4**-knop (neemt één volledige cyclus
+op via canvas + MediaRecorder — **geen ffmpeg nodig**); de animatie houdt aan
+het eind 10 s de eindstand vast voordat de cyclus opnieuw begint.
 
-- **Amount of Steam games over time** — geanimeerde cumulatieve tijdlijn:
-  het aantal games (appids uit `games.csv`) dat tot elke releasedatum is
-  uitgekomen. De tijdcursor loopt over de hele periode en voegt per release
-  games toe aan de lijn; bij de teller staat alleen maand + jaar (geen dag).
-  Boven de grafiek staat de bediening: ▶ Play/pause, ⟲ Restart, een
-  instelbare **Duration** (10–120 s), de kleurkiezers en de knop
-  **⬇ Export MP4** (neemt één volledige cyclus op via canvas +
-  MediaRecorder — **geen ffmpeg nodig**) die
-  `steam_games_released_timeline.mp4` downloadt.
-- **Games released per weekday** — statische staafgrafiek: aantal games per
-  dag-van-week (de aantallen staan in de y-as; boven elke staaf staat het
-  percentage). Dag-van-week primair uit `date.csv` (`day_of_week_label`,
-  ISO maandag=1); releasedatums buiten het bereik van `date.csv` worden
-  direct uit de datum berekend (sinds de 2003-09-12-clamp geen enkele meer).
+- **Amount of Steam games over time** — cumulatieve tijdlijn: het aantal games
+  (appids uit `games.csv`) dat tot elke releasedatum is uitgekomen. De
+  tijdcursor loopt over de hele periode en voegt per release games toe aan de
+  lijn; bij de teller staat alleen maand + jaar (geen dag). De y-as schaalt
+  dynamisch mee en zoomt bij elke stapwissel vloeiend uit. Export:
+  `steam_games_released_timeline.mp4`.
+- **Games released per year** — kolomdiagram dat zich jaar na jaar opbouwt: per
+  releasejaar het totaal aantal games van dat jaar (de aantallen staan in de
+  y-as én als getal boven elke kolom). Het lopende jaar groeit mee met de
+  cursor en de y-as zoomt vloeiend mee (`YEAR_Y_STEPS`, fijnere stappen dan de
+  tijdlijn) zodat ook de vroege jaren goed zichtbaar zijn; de grote teller
+  toont het jaar waar de cursor staat. Het eerste jaar (2003, Steam ging op
+  12-09-2003 live) en het lopende jaar zijn onvolledig — dat staat in de
+  voettekst. Export: `steam_games_released_per_year.mp4`.
+- De **weekday-grafiek** (aantal games per dag-van-week) is op verzoek
+  verwijderd; daarmee is `data/date.csv` niet langer nodig voor de app.
 
 Donker thema; de **hele interface is Engels**. Kleuren zijn **per grafiek**
 instelbaar: boven de tijdlijn **Line** (lijn/oppervlak + teller) en
-**Accent** (stip); boven de weekday-grafiek een eigen **Color** (alle
-balken). Elke grafiek heeft daarnaast zijn eigen rij met **Axis** (grootte
-10–44), **Bold** en **Color** voor de x-/y-aswaarden, plus een **Y label**
-toggle (verbergt bv. het label "Amount"). Die as-instellingen zijn
-gedeeld: ze werken op alle grafieken (ook toekomstige).
+**Accent** (stip); boven de per-jaar-grafiek een eigen **Color** (alle
+kolommen). Elke grafiek heeft daarnaast zijn eigen rij met
+**Axis** (grootte 10–44), **Bold** en **Color** voor de x-/y-aswaarden,
+plus een **Y label** toggle (verbergt bv. het label "Amount"). Die
+as-instellingen zijn gedeeld: ze werken op alle grafieken (ook
+toekomstige), en worden tijdens een MP4-opname op slot gezet.
 
-Draaien (fetch op de CSV's werkt niet vanaf `file://`, dus via een lokale
+Draaien (fetch op de CSV werkt niet vanaf `file://`, dus via een lokale
 server):
 
 ```bash
@@ -598,10 +604,10 @@ python -m http.server 8090
 # open http://localhost:8090/viz/index.html
 ```
 
-De pagina leest `data/games.csv` + `data/date.csv` bij elke keer laden. Die
-CSV's zitten niet in git, dus draai eerst `python jsonl_to_table.py` (op de
-jsonl-bestanden van de laatste run) en ververs de pagina. Houd het tabblad
-zichtbaar tijdens een MP4-opname.
+De pagina leest `data/games.csv` bij elke keer laden. Die CSV zit niet in git,
+dus draai eerst `python jsonl_to_table.py` (op de jsonl-bestanden van de
+laatste run) en ververs de pagina. Houd het tabblad zichtbaar tijdens een
+MP4-opname.
 
 ## ⚠️ Belangrijk
 

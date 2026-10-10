@@ -1,25 +1,31 @@
 /* =====================================================================
  * Steam-games visualisatie (viz/) - Backgrounds-stijl
  * ---------------------------------------------------------------------
- * - Leest data/games.csv + data/date.csv (via fetch -> lokale server).
- * - Tijdlijn: "Amount of Steam games over time" - cumulatief aantal
- *   games (appids) tot elke releasedatum, geanimeerd in de browser.
- *   Elke tick verschuift de tijdcursor en voegt de releases t/m die
- *   datum toe aan de lijn (tijdsverloop simulatie). De y-as schaalt
- *   DYNAMISCH mee met de teller in GROVE stappen (0..1000 → 10.000 →
- *   50.000 → 150.000 → ...; `Y_STEPS`/`yCeil`) i.p.v. meteen 0..130.000;
- *   bij een stapwissel ZOOMT de as ~1,2 s vloeiend (met crossfade van de
+ * - Leest data/games.csv (via fetch -> lokale server).
+ * - TWEE GEANIMEERDE grafieken, elk met eigen Play/Restart/Duration en
+ *   eigen MP4-export (`anims`, `makeAnim`, `bindAnimControls`):
+ *   (1) Tijdlijn: "Amount of Steam games over time" - cumulatief aantal
+ *       games (appids) tot elke releasedatum. Elke tick verschuift de
+ *       tijdcursor en voegt de releases t/m die datum toe aan de lijn
+ *       (tijdsverloop simulatie). De y-as schaalt DYNAMISCH mee met de
+ *       teller in GROVE stappen (0..1000 → 10.000 → 50.000 → 150.000 →
+ *       ...; `Y_STEPS`/`yCeil`) i.p.v. meteen 0..130.000.
+ *   (2) Per jaar: "Games released per year" - één kolom per releasejaar
+ *       met het totaal van dat jaar; de kolommen komen jaar na jaar
+ *       tevoorschijn en de y-as zoomt VLOEIEND mee (`YEAR_Y_STEPS`/
+ *       `yearYCeil` - fijnere stappen dan de tijdlijn, zodat de kolommen
+ *       altijd een groot deel van de hoogte vullen). Het lopende jaar
+ *       groeit mee met de cursor (aantal releases tot die datum) en de
+ *       grote teller toont dat jaar + dat aantal.
+ *   Bij een stapwissel ZOOMT de as ~1,2 s vloeiend (met crossfade van de
  *   oude/nieuwe gridlabels) i.p.v. een harde sprong. Aan het einde houdt
- *   de animatie 10 s de eindstand vast (`END_PAUSE_MS`) voordat de cyclus
- *   opnieuw begint.
+ *   elke animatie 10 s de eindstand vast (`END_PAUSE_MS`) voordat de
+ *   cyclus opnieuw begint.
  * - MP4-export: canvas.captureStream + MediaRecorder, download van een
  *   volledige cyclus (geen ffmpeg nodig, zoals Backgrounds).
- * - Weekday-grafiek: aantal games per dag-van-week, primair uit
- *   date.csv (day_of_week_label, ISO maandag=1..zondag=7); releasedatums
- *   buiten date.csv (vóór 2003) direct uit de datum berekend.
  * - Filter: alleen releasedatums t/m vandaag (einddatum = vandaag).
  *   Placeholder-datums daarna (bv. 9998-01-01) vallen buiten BEIDE
- *   grafieken en de tijdlijn-as eindigt op vandaag.
+ *   grafieken en de assen eindigen op vandaag.
  * ===================================================================== */
 
 "use strict";
@@ -27,7 +33,7 @@
 /* ---------- Kleuren ----------
  * Vast: donker thema. Per-grafiek kleuren (niet gedeeld):
  * chartColors.timeline (lijn/oppervlak/teller = line, stip = accent) en
- * chartColors.weekday (balken = color). Elke grafiek heeft eigen kleurkiezer(s). */
+ * chartColors.yearly (kolommen = color). Elke grafiek heeft eigen kleurkiezer(s). */
 const C = {
   bg: "#0f1a26",                     // canvas-achtergrond
   grid: "rgba(199,213,224,0.08)",    // rasterlijnen
@@ -39,7 +45,7 @@ const C = {
 /* Kleuren per grafiek (NIET gedeeld): elke grafiek heeft eigen kleurkiezer(s). */
 const chartColors = {
   timeline: { line: "#66c0f4", accent: "#e74c3c" },
-  weekday:  { color: "#66c0f4" },
+  yearly:   { color: "#66c0f4" },
 };
 
 /* Stijl van de x-/y-aswaarden (ticklabels) + y-as-label (bv. Amount).
@@ -58,40 +64,52 @@ function withAlpha(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-const DAYS_ORDER = ["monday", "tuesday", "wednesday", "thursday",
-                    "friday", "saturday", "sunday"];
-const DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday",
-                    "Friday", "Saturday", "Sunday"];
 const MONTHS_FULL = ["January", "February", "March", "April", "May",
                      "June", "July", "August", "September", "October",
                      "November", "December"];
 
 const el = {
   timeline: document.getElementById("timelineCanvas"),
-  weekday: document.getElementById("weekdayCanvas"),
-  playBtn: document.getElementById("playBtn"),
-  restartBtn: document.getElementById("restartBtn"),
-  durSlider: document.getElementById("durSlider"),
-  durVal: document.getElementById("durVal"),
-  exportBtn: document.getElementById("exportBtn"),
-  exportStatus: document.getElementById("exportStatus"),
-  recBadge: document.getElementById("recBadge"),
+  yearly: document.getElementById("yearlyCanvas"),
   lineColor: document.getElementById("lineColor"),
   accentColor: document.getElementById("accentColor"),
-  weekdayColor: document.getElementById("weekdayColor"),
+  yearlyColor: document.getElementById("yearlyColor"),
   axisSize: document.getElementById("axisSize"),
   axisSizeVal: document.getElementById("axisSizeVal"),
   axisBold: document.getElementById("axisBold"),
   axisColor: document.getElementById("axisColor"),
   axisYLabel: document.getElementById("axisYLabel"),
-  wdAxisSize: document.getElementById("wdAxisSize"),
-  wdAxisSizeVal: document.getElementById("wdAxisSizeVal"),
-  wdBold: document.getElementById("wdBold"),
-  wdColor: document.getElementById("wdAxisColor"),
-  wdYLabel: document.getElementById("wdYLabel"),
+  yrAxisSize: document.getElementById("yrAxisSize"),
+  yrAxisSizeVal: document.getElementById("yrAxisSizeVal"),
+  yrBold: document.getElementById("yrBold"),
+  yrAxisColor: document.getElementById("yrAxisColor"),
+  yrYLabel: document.getElementById("yrYLabel"),
   dataInfo: document.getElementById("dataInfo"),
   timelineFoot: document.getElementById("timelineFoot"),
-  weekdayFoot: document.getElementById("weekdayFoot"),
+  yearlyFoot: document.getElementById("yearlyFoot"),
+};
+
+/* Bediening per animatie-grafiek; `el` hierboven bevat de gedeelde
+ * stijlregelaars (kleuren van de grafieken + de as-instellingen). */
+const animEl = {
+  timeline: {
+    playBtn: document.getElementById("playBtn"),
+    restartBtn: document.getElementById("restartBtn"),
+    durSlider: document.getElementById("durSlider"),
+    durVal: document.getElementById("durVal"),
+    exportBtn: document.getElementById("exportBtn"),
+    exportStatus: document.getElementById("exportStatus"),
+    recBadge: document.getElementById("recBadge"),
+  },
+  yearly: {
+    playBtn: document.getElementById("yrPlayBtn"),
+    restartBtn: document.getElementById("yrRestartBtn"),
+    durSlider: document.getElementById("yrDurSlider"),
+    durVal: document.getElementById("yrDurVal"),
+    exportBtn: document.getElementById("yrExportBtn"),
+    exportStatus: document.getElementById("yrExportStatus"),
+    recBadge: document.getElementById("yrRecBadge"),
+  },
 };
 
 const state = {
@@ -102,21 +120,11 @@ const state = {
   todayMs: 0,             // UTC-middernacht van vandaag (eindgrens = vandaag)
   relTimes: [],           // unieke releasedatums (ms, oplopend)
   relCounts: [],          // cumulatief aantal t/m elke relTime
-  yTrans: [],             // vloeiende y-as-overgangen: {p, from, to}
+  yTrans: [],             // vloeiende y-as-overgangen tijdlijn: {p, from, to}
+  yearlyTrans: [],        // idem voor de per-jaar-grafiek
   firstYear: 0, lastYear: 0,
   tMin: 0, tMax: 0,       // as-bereik (ms) — tMax = vandaag (einddatum-filter)
-  weekdayCounts: [0, 0, 0, 0, 0, 0, 0],
-  weekdayFallback: 0,     // releases buiten date.csv (weekday direct berekend)
-  // playback
-  playing: false,
-  elapsed: 0,             // ms "animatietijd" (1 cyclus = durMs)
-  durMs: 30000,
-  pauseP: 0,
-  recording: false,
-  cancelExport: false,
-  exportTimer: null,
-  mediaRec: null,
-  chunks: [],
+  yearly: [],             // [{year, count, cumBefore}] per releasejaar (leemtes = 0)
 };
 
 /* =====================================================================
@@ -167,16 +175,53 @@ function yTicks(ymax) {
   return out;
 }
 
+/* Fijnere y-as-stappen voor de per-jaar-grafiek. Daar liggen de waarden
+ * (per jaar!) honderden keren lager dan de cumulatieve teller van de
+ * tijdlijn, dus de grove Y_STEPS zouden de kolommen jarenlang in een
+ * klein hoekje duwen (en aan het eind op 0..50.000 uitkomen). Deze
+ * stappen houden de hoogste kolom steeds op ~60-95% van de as. */
+const YEAR_Y_STEPS = [25, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000,
+                      7500, 10000, 15000, 20000, 25000, 50000, 100000];
+
+/* Kleinste per-jaar-stap ≥ v (lijst hierboven; ver daarboven: verdubbelen). */
+function yearYCeil(v) {
+  for (const s of YEAR_Y_STEPS) {
+    if (v <= s + 1e-9) return s;
+  }
+  let s = YEAR_Y_STEPS[YEAR_Y_STEPS.length - 1];
+  while (s < v) s *= 2;
+  return s;
+}
+
+/* Stapwissels omzetten in een VLOEIENDE, aaneengesloten keten. Wissels die
+ * dichter op elkaar liggen dan het zoomvenster worden samengevoegd (anders
+ * zou de as aan het eind van het eerste venster alsnog een harde sprong
+ * naar de volgende stap maken) en elke wissel begint bij de stap die op
+ * dat moment echt geldt. */
+function mergeYTrans(raw, transW) {
+  const out = [];
+  for (const tr of raw) {
+    const last = out[out.length - 1];
+    if (last && tr.p < last.p + transW) last.to = tr.to;
+    else out.push({ p: tr.p, from: last ? last.to : tr.from, to: tr.to });
+  }
+  return out;
+}
+
+/* De y-as-overgang die op p geldt: de MEEST RECENTE stapwissel (de keten
+ * hierboven is oplopend in p). */
+function yTransitionAt(trans, p) {
+  let tr = null;
+  for (const t of trans) {
+    if (t.p <= p) tr = t; else break;
+  }
+  return tr;
+}
+
 /* 'yyyy-mm-dd' -> ms sinds epoch (UTC-middernacht, geen TZ-shift). */
 function dateToMs(s) {
   const p = s.split("-");
   return Date.UTC(+p[0], +p[1] - 1, +p[2]);
-}
-/* ISO-weekdag-index uit een 'yyyy-mm-dd' (maandag=0..zondag=6). */
-function dateToDowIdx(s) {
-  const p = s.split("-");
-  const d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
-  return (d.getUTCDay() + 6) % 7;
 }
 function fmtMonthYear(ms) {
   const d = new Date(ms);
@@ -232,40 +277,54 @@ function upperBound(arr, v) {
   return lo;
 }
 
+/* Aantal games met een releasedatum t/m t (state.relTimes is oplopend). */
+function cumCount(t) {
+  const i = upperBound(state.relTimes, t);
+  return i > 0 ? state.relCounts[i - 1] : 0;
+}
+
+/* Kolomwaarden van de per-jaar-grafiek op tijdstip t: afgeronde jaren hun
+ * totaal, het LOPENDE jaar alleen wat er tot t is uitgekomen (zo groeit die
+ * kolom mee met de cursor). `max` = de hoogste kolom op dat moment, voor de
+ * dynamische y-as. */
+function yearValuesAt(t) {
+  const rows = state.yearly;
+  const cum = cumCount(t);
+  const curYear = new Date(t).getUTCFullYear();
+  const vals = new Array(rows.length);
+  let max = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    let v;
+    if (r.year > curYear) v = 0;
+    else if (r.year < curYear) v = r.count;
+    else v = Math.max(0, Math.min(r.count, cum - r.cumBefore));
+    vals[i] = v;
+    if (v > max) max = v;
+  }
+  return { vals, max, curYear };
+}
+
 /* =====================================================================
  * Data laden
  * ===================================================================== */
 async function loadData() {
   try {
-    const [gamesCsv, dateCsv] = await Promise.all([
-      fetch("../data/games.csv").then((r) => {
-        if (!r.ok) throw new Error(`games.csv: HTTP ${r.status}`);
-        return r.text();
-      }),
-      fetch("../data/date.csv").then((r) => {
-        if (!r.ok) throw new Error(`date.csv: HTTP ${r.status}`);
-        return r.text();
-      }),
-    ]);
+    const gamesCsv = await fetch("../data/games.csv").then((r) => {
+      if (!r.ok) throw new Error(`games.csv: HTTP ${r.status}`);
+      return r.text();
+    });
 
     const gamesRows = parseCSV(gamesCsv);
-    const dateRows = parseCSV(dateCsv);
 
-    // Weekday-zoekmap uit date.csv: date_fmt -> dag-van-week-label.
-    const dowMap = {};
-    for (const r of dateRows) {
-      if (r.date_fmt && r.day_of_week_label) {
-        dowMap[r.date_fmt] = r.day_of_week_label.toLowerCase();
-      }
-    }
-
-    // Games met geldige releasedatum t/m vandaag; tel de dag-van-week.
+    // Games met geldige releasedatum t/m vandaag; tel per datum en per jaar.
     // Releasedatums NA vandaag zijn placeholder-datums van nog niet
     // uitgebrachte games (bv. 9998-01-01) en blijven buiten de grafieken.
     const now = new Date();
     state.todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
     state.gamesTotal = gamesRows.length;
     const byDate = new Map(); // dateStr -> aantal
+    const byYear = new Map(); // jaar -> aantal
     let withDate = 0;
     for (const g of gamesRows) {
       const d = g.release_date_fmt;
@@ -273,15 +332,22 @@ async function loadData() {
       if (dateToMs(d) > state.todayMs) { state.futureDated++; continue; }
       withDate++;
       byDate.set(d, (byDate.get(d) || 0) + 1);
-      const label = dowMap[d];
-      const idx = label !== undefined ? DAYS_ORDER.indexOf(label)
-                                      : dateToDowIdx(d);
-      if (idx >= 0) {
-        state.weekdayCounts[idx]++;
-        if (label === undefined) state.weekdayFallback++;
-      }
+      const yr = +d.slice(0, 4);
+      byYear.set(yr, (byYear.get(yr) || 0) + 1);
     }
     state.withDate = withDate;
+
+    // Per-jaar-data: één rij per jaar (ook jaren zonder release = 0), zodat
+    // de x-as van de kolomdiagram aaneengesloten blijft. `cumBefore` =
+    // aantal releases vóór 1 januari van dat jaar (voor het lopende jaar).
+    {
+      const years = [...byYear.keys()];
+      const y0 = Math.min(...years), y1 = Math.max(...years);
+      state.yearly = [];
+      for (let y = y0; y <= y1; y++) {
+        state.yearly.push({ year: y, count: byYear.get(y) || 0, cumBefore: 0 });
+      }
+    }
 
     // Tijdlijn-data: unieke releasedatums + cumulatief.
     const times = [...byDate.keys()].map(dateToMs).sort((a, b) => a - b);
@@ -303,20 +369,35 @@ async function loadData() {
                           state.relTimes[0]);
     state.tMax = state.todayMs;   // eindgrens = vandaag (geen padding meer)
 
-    // Vloeiende y-as: op welke p verspringt de y-as-stap (Y_STEPS) en van/
-    // naar welke bovengrens. drawTimeline zoomt daar ~1,2 s soepel naartoe
-    // (Y_TRANS_MS) i.p.v. een harde sprong.
+    // Cumulatief vóór elk jaar (relTimes is oplopend gesorteerd).
+    for (const row of state.yearly) {
+      const i = upperBound(times, Date.UTC(row.year, 0, 1) - 1);
+      row.cumBefore = i > 0 ? counts[i - 1] : 0;
+    }
+
+    // Vloeiende y-as: op welke p verspringt de y-as-stap en van/naar welke
+    // bovengrens. De grafiek zoomt daar ~1,2 s soepel naartoe (Y_TRANS_MS)
+    // i.p.v. een harde sprong. De tijdlijn gebruikt de cumulatieve teller,
+    // de per-jaar-grafiek de hoogste kolom op dat moment.
+    const pOf = (t) => (t - state.tMin) / (state.tMax - state.tMin);
     state.yTrans = [];
     {
       let prevY = yCeil(0);
       for (let i = 0; i < times.length; i++) {
         const y = yCeil(counts[i] * 1.05);
         if (y !== prevY) {
-          state.yTrans.push({
-            p: (times[i] - state.tMin) / (state.tMax - state.tMin),
-            from: prevY,
-            to: y,
-          });
+          state.yTrans.push({ p: pOf(times[i]), from: prevY, to: y });
+          prevY = y;
+        }
+      }
+    }
+    state.yearlyTrans = [];
+    {
+      let prevY = yearYCeil(0);
+      for (const t of times) {
+        const y = yearYCeil(yearValuesAt(t).max * 1.08);
+        if (y !== prevY) {
+          state.yearlyTrans.push({ p: pOf(t), from: prevY, to: y });
           prevY = y;
         }
       }
@@ -334,23 +415,29 @@ async function loadData() {
         : "") +
       `${state.relTimes.length} unique release dates · ` +
       `animation from ${state.firstYear} to ${state.lastYear}`;
-    const dowTotal = state.weekdayCounts.reduce((a, b) => a + b, 0);
-    el.weekdayFoot.textContent =
-      `Based on ${fmtInt(dowTotal)} releases up to today · weekday from date.csv ` +
-      `(ISO, Monday=1)${state.weekdayFallback
-        ? ` · ${state.weekdayFallback} releases before 2003 computed directly from the date`
-        : ""}`;
+    const yrs = state.yearly;
+    const yearTotal = yrs.reduce((a, b) => a + b.count, 0);
+    // Drukste jaar van de VOLLEDIGE jaren (het eerste en het lopende jaar
+    // zijn onvolledig en zouden het beeld scheef trekken).
+    const full = yrs.slice(1, -1);
+    const best = full.reduce((a, b) => (b.count > a.count ? b : a), full[0]);
+    el.yearlyFoot.textContent =
+      `Based on ${fmtInt(yearTotal)} releases up to today (${fmtDateISO(state.todayMs)}) · ` +
+      `${yrs.length} years${best
+        ? ` · busiest full year: ${best.year} with ${fmtInt(best.count)} releases`
+        : ""} · the first year (${yrs[0].year}) and the current year ` +
+      `(${yrs[yrs.length - 1].year}) are partial, so their columns keep growing ` +
+      `until the animation reaches the end`;
 
-    drawWeekday();
-    state.pauseP = 0;
-    drawTimeline(0);
     state.ready = true;
+    drawTimeline(0);
+    drawYearly(0);
   } catch (err) {
     el.dataInfo.textContent = "❌ Failed to load";
     const box = document.createElement("div");
     box.className = "error-box";
     box.textContent =
-      "Could not load data/games.csv or data/date.csv (" + err.message + "). " +
+      "Could not load data/games.csv (" + err.message + "). " +
       "Open this page through a local web server - fetch does not work " +
       "from file://.";
     document.querySelector("main").prepend(box);
@@ -392,18 +479,12 @@ function drawTimeline(p) {
    * 0..1000, want het duurt ~7 jaar voor 1000 games. Bij een stapwissel
    * ZOOMT de as ~1,2 s vloeiend naar de nieuwe bovengrens (smoothstep)
    * i.p.v. een harde sprong. */
-  let ymax = yCeil(curCount * 1.05);
-  let trans = null, transE = 0;
-  const transW = Y_TRANS_MS / st.durMs;   // vensterbreedte in p-eenheden
-  for (const tr of st.yTrans) {
-    if (p >= tr.p && p <= tr.p + transW) {
-      trans = tr;
-      const t = (p - tr.p) / transW;
-      transE = t * t * (3 - 2 * t);       // smoothstep (rustig in/uit)
-      ymax = tr.from + (tr.to - tr.from) * transE;
-      break;
-    }
-  }
+  const transW = Y_TRANS_MS / anims.timeline.durMs;   // vensterbreedte in p-eenheden
+  const trans = yTransitionAt(mergeYTrans(st.yTrans, transW), p);
+  const transE = trans ? Math.min(1, (p - trans.p) / transW) : 0;
+  let ymax = trans
+    ? trans.from + (trans.to - trans.from) * (transE * transE * (3 - 2 * transE))
+    : yCeil(curCount * 1.05);
   const Y = (v) => y0 + ph - (v / ymax) * ph;
 
   /* Y-grid + labels — tijdens een overgang cross-faden de tickwaarden van
@@ -412,9 +493,10 @@ function drawTimeline(p) {
    * schaal Y, zodat de as als één geheel rustig uitzoomt. */
   const ticks = new Map();               // tickwaarde -> alpha
   if (trans) {
-    for (const v of yTicks(trans.from)) ticks.set(v, 1 - transE);
+    const e = transE * transE * (3 - 2 * transE);
+    for (const v of yTicks(trans.from)) ticks.set(v, 1 - e);
     for (const v of yTicks(trans.to)) {
-      ticks.set(v, Math.min(1, (ticks.get(v) || 0) + transE));
+      ticks.set(v, Math.min(1, (ticks.get(v) || 0) + e));
     }
   } else {
     for (const v of yTicks(ymax)) ticks.set(v, 1);
@@ -527,20 +609,21 @@ function drawTimeline(p) {
 }
 
 /* =====================================================================
- * Weekday-grafiek (statisch)
+ * Per-jaar-grafiek (geanimeerd): één kolom per releasejaar met het totaal
+ * van dat jaar. De cursor loopt over dezelfde tijdsas als de tijdlijn; elk
+ * jaar komt tevoorschijn zodra de cursor het bereikt en het LOPENDE jaar
+ * groeit mee. De y-as zoomt vloeiend mee (YEAR_Y_STEPS, ~1,2 s smoothstep)
+ * zodat de vroege jaren groot in beeld staan i.p.v. onzichtbare streepjes.
  * ===================================================================== */
-function drawWeekday() {
-  const cv = el.weekday;
+function drawYearly(p) {
+  const cv = el.yearly;
   const ctx = cv.getContext("2d");
   const W = cv.width, H = cv.height;
-  const M = { l: 150, r: 60, t: 130, b: 105 };
+  const M = { l: 130, r: 70, t: 235, b: 105 };
   const x0 = M.l, y0 = M.t;
   const pw = W - M.l - M.r, ph = H - M.t - M.b;
-  const vals = state.weekdayCounts;
-  const total = vals.reduce((a, b) => a + b, 0);
-  const maxV = Math.max(...vals, 1);
-  const yMax = maxV * 1.25;
-  const Y = (v) => y0 + ph - (v / yMax) * ph;
+  const st = state;
+  const rows = st.yearly;
 
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = C.bg;
@@ -551,7 +634,26 @@ function drawWeekday() {
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = C.text;
   ctx.font = "700 40px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText("Games released per weekday", W / 2, 66);
+  ctx.fillText("Games released per year", W / 2, 58);
+
+  if (!rows.length) return;
+
+  /* Kolomwaarden bij de cursor + de hoogste kolom (voor de y-as) */
+  const tCur = st.tMin + p * (st.tMax - st.tMin);
+  const { vals, max, curYear } = yearValuesAt(tCur);
+
+  /* Dynamische y-as: kleinste per-jaar-stap ≥ hoogste kolom; bij een
+   * stapwissel zoomt de as ~1,2 s vloeiend (smoothstep) i.p.v. een harde
+   * sprong — zelfde aanpak als de tijdlijn, met eigen (fijnere) stappen
+   * en 8% kopruimte zodat het getal boven de hoogste kolom vrij blijft
+   * van de teller boven de grafiek. */
+  const transW = Y_TRANS_MS / anims.yearly.durMs;
+  const trans = yTransitionAt(mergeYTrans(st.yearlyTrans, transW), p);
+  const e = trans ? Math.min(1, (p - trans.p) / transW) : 0;
+  const ymax = trans
+    ? trans.from + (trans.to - trans.from) * (e * e * (3 - 2 * e))
+    : yearYCeil(max * 1.08);
+  const Y = (v) => y0 + ph - (v / ymax) * ph;
 
   /* Y-as-label "Amount" (geroteerd) - verbergbaar met de Y-label-toggle */
   if (axis.yLabel) {
@@ -566,12 +668,14 @@ function drawWeekday() {
     ctx.restore();
   }
 
-  /* Y-grid + ticklabels (de aantallen staan in de y-as) */
-  const yStep = niceStep(yMax / 6);
+  /* Y-grid + ticklabels (ronde stappen via niceStep; de as-bovengrens zelf
+   * hoeft dus geen rond getal te zijn en het toplabel hoeft niet de
+   * bovengrens te zijn). */
+  const yStep = niceStep(ymax / 6);
   ctx.font = axisFont();
   ctx.textAlign = "right";
   ctx.textBaseline = "alphabetic";
-  for (let v = 0; v <= yMax; v += yStep) {
+  for (let v = 0; v <= ymax + 1e-9; v += yStep) {
     ctx.strokeStyle = C.grid;
     ctx.beginPath();
     ctx.moveTo(x0, Y(v));
@@ -590,38 +694,106 @@ function drawWeekday() {
   ctx.lineTo(x0 + pw, y0 + ph);
   ctx.stroke();
 
-  /* Bars (all the same color = chartColors.weekday.color) + only the
-   * percentage above each bar */
-  const slot = pw / 7;
-  const barW = slot * 0.56;
+  /* Kolommen (chartColors.yearly.color) + het aantal erboven. De kolommen
+   * staan dicht op elkaar, dus het getal krimpt mee tot het binnen de
+   * kolombreedte past (alle getallen even groot, dus één meting vooraf).
+   * Nog niet bereikte jaren (waarde 0) krijgen geen kolom en geen getal. */
+  const n = rows.length;
+  const slot = pw / n;
+  const barW = slot * 0.62;
+  const nums = vals.map(fmtInt);
+  let numSize = 26;
+  ctx.font = `600 ${numSize}px 'Segoe UI', Arial, sans-serif`;
+  let numW = Math.max(...nums.map((t) => ctx.measureText(t).width));
+  const numMax = slot - 6;
+  if (numW > numMax) {
+    numSize = Math.max(12, Math.floor(numSize * numMax / numW));
+    ctx.font = `600 ${numSize}px 'Segoe UI', Arial, sans-serif`;
+    numW = Math.max(...nums.map((t) => ctx.measureText(t).width));
+  }
   ctx.textAlign = "center";
-  for (let i = 0; i < 7; i++) {
+  ctx.fillStyle = chartColors.yearly.color;
+  for (let i = 0; i < n; i++) {
+    if (vals[i] <= 0) continue;
     const cx = x0 + slot * (i + 0.5);
-    const v = vals[i];
-    const pct = total ? (100 * v) / total : 0;
-    // bar
-    ctx.fillStyle = chartColors.weekday.color;
-    ctx.fillRect(cx - barW / 2, Y(v), barW, y0 + ph - Y(v));
-    // percentage boven de staaf
-    ctx.fillStyle = C.text;
-    ctx.font = "600 24px 'Segoe UI', Arial, sans-serif";
-    ctx.fillText(pct.toFixed(1) + "%", cx, Y(v) - 14);
+    ctx.fillRect(cx - barW / 2, Y(vals[i]), barW, y0 + ph - Y(vals[i]));
+  }
+  ctx.fillStyle = C.text;
+  for (let i = 0; i < n; i++) {
+    if (vals[i] <= 0) continue;
+    ctx.fillText(nums[i], x0 + slot * (i + 0.5), Y(vals[i]) - 14);
   }
 
-  /* Weekday-labels onder de as */
+  /* Jaarlabels onder de as: met zoveel kolommen kunnen ze bij een grote
+   * Axis-grootte overlappen, dus alleen labels die ruim genoeg uit elkaar
+   * staan; het laatste jaar staat er altijd bij. */
   ctx.fillStyle = axis.color;
   ctx.font = axisFont();
   ctx.textAlign = "center";
-  for (let i = 0; i < 7; i++) {
-    ctx.fillText(DAY_LABELS[i], x0 + slot * (i + 0.5), y0 + ph + 38);
+  const yearW = ctx.measureText(String(rows[n - 1].year)).width;
+  const gap = yearW + 14;
+  const show = [];
+  let lastX = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const cx = x0 + slot * (i + 0.5);
+    if (cx - lastX >= gap) { show.push(i); lastX = cx; }
   }
+  if (show[show.length - 1] !== n - 1) {
+    if (x0 + slot * (n - 0.5) - lastX < gap) show.pop();
+    show.push(n - 1);
+  }
+  for (const i of show) {
+    ctx.fillText(String(rows[i].year), x0 + slot * (i + 0.5), y0 + ph + 38);
+  }
+
+  /* Grote teller + jaar (in de kop boven de plot): het aantal van het jaar
+   * waar de cursor staat (groeit mee binnen dat jaar). */
+  ctx.textAlign = "left";
+  ctx.fillStyle = chartColors.yearly.color;
+  ctx.font = "800 88px 'Segoe UI', Arial, sans-serif";
+  ctx.fillText(fmtInt(vals[Math.max(0, curYear - rows[0].year)] ?? 0), x0, 168);
+  ctx.font = "500 35px 'Segoe UI', Arial, sans-serif";
+  ctx.fillStyle = C.muted;
+  ctx.fillText("Games released in " + curYear, x0, 212);
 }
 
 /* =====================================================================
- * Afspelen
+ * Afspelen (per grafiek een eigen animatie)
  * ===================================================================== */
-function setPlayUI() {
-  el.playBtn.textContent = state.playing ? "⏸ Pause" : "▶ Play";
+
+/* Elke animatie-grafiek heeft eigen playback-state, zodat Play/Restart/
+ * Duration/Export per grafiek werken (`anims.timeline`, `anims.yearly`).
+ * Let op: `anims` wordt ook door de tekenfuncties gebruikt voor de duur
+ * van een y-as-overgang, dus hij staat hierboven niet in `state`. */
+const anims = {
+  timeline: makeAnim("timeline", el.timeline, drawTimeline,
+                     "steam_games_released_timeline", animEl.timeline),
+  yearly: makeAnim("yearly", el.yearly, drawYearly,
+                   "steam_games_released_per_year", animEl.yearly),
+};
+
+function makeAnim(name, canvas, draw, fileBase, ui) {
+  return {
+    name, canvas, draw, fileBase, ui,
+    playing: false,
+    elapsed: 0,          // ms "animatietijd" (1 cyclus = durMs + END_PAUSE_MS)
+    durMs: 30000,
+    p: 0,                // laatst getekende p (voor hertekenen bij stijlwijziging)
+    lastTs: 0,
+    recording: false,
+    cancelExport: false,
+    exportTimer: null,
+    mediaRec: null,
+    chunks: [],
+  };
+}
+
+function anyRecording() {
+  return Object.values(anims).some((a) => a.recording);
+}
+
+function setPlayUI(anim) {
+  anim.ui.playBtn.textContent = anim.playing ? "⏸ Pause" : "▶ Play";
 }
 
 /* Pauze op het einde van de animatie: 10 s de eindstand vasthouden voordat
@@ -629,50 +801,53 @@ function setPlayUI() {
 const END_PAUSE_MS = 10000;
 
 function loop(ts) {
-  if (state.ready && state.playing) {
-    if (!state.lastTs) state.lastTs = ts;
-    const dt = ts - state.lastTs;
-    state.elapsed += dt;
-    const cycle = state.durMs + END_PAUSE_MS;
-    const et = state.elapsed % cycle;                      // tijd in de cyclus
-    const p = et >= state.durMs ? 1 : et / state.durMs;    // laatste 10 s: eindstand
-    state.pauseP = p;
-    drawTimeline(p);
+  for (const anim of Object.values(anims)) {
+    if (state.ready && anim.playing) {
+      if (!anim.lastTs) anim.lastTs = ts;
+      const dt = ts - anim.lastTs;
+      anim.elapsed += dt;
+      const cycle = anim.durMs + END_PAUSE_MS;
+      const et = anim.elapsed % cycle;                   // tijd in de cyclus
+      const p = et >= anim.durMs ? 1 : et / anim.durMs;  // laatste 10 s: eindstand
+      anim.p = p;
+      anim.draw(p);
+    }
+    anim.lastTs = ts;
   }
-  state.lastTs = ts;
   requestAnimationFrame(loop);
 }
 
 function redrawCharts() {
   if (!state.ready) return;
-  if (!state.playing) drawTimeline(state.pauseP);
-  drawWeekday();
+  for (const anim of Object.values(anims)) {
+    if (!anim.playing) anim.draw(anim.p);
+  }
 }
 
 /* Koppel een as-config-regel (grootte/vet/kleur/y-label) aan de gedeelde
- * axis-instellingen. Zo werkt dezelfde config boven de tijdlijn én boven
- * de weekday-grafiek (en elke toekomstige grafiek die hem toevoegt). */
+ * axis-instellingen. Zo werkt dezelfde config boven elke grafiek (en elke
+ * toekomstige grafiek die hem toevoegt). */
 function bindAxisGroup(g) {
   g.size.addEventListener("input", () => {
-    if (state.recording) return;
+    if (anyRecording()) return;
     axis.size = +g.size.value;
     syncAxisUI();
     redrawCharts();
   });
   g.bold.addEventListener("change", () => {
-    if (state.recording) return;
+    if (anyRecording()) return;
     axis.bold = g.bold.checked;
     syncAxisUI();
     redrawCharts();
   });
   g.color.addEventListener("input", () => {
-    if (state.recording) return;
+    if (anyRecording()) return;
     axis.color = g.color.value;
     syncAxisUI();
     redrawCharts();
   });
   g.ylabel.addEventListener("change", () => {
-    if (state.recording) return;
+    if (anyRecording()) return;
     axis.yLabel = g.ylabel.checked;
     syncAxisUI();
     redrawCharts();
@@ -682,82 +857,98 @@ function bindAxisGroup(g) {
 /* Spiegel de gedeelde axis-instellingen naar alle regelaars op de pagina. */
 function syncAxisUI() {
   el.axisSize.value = axis.size;
-  el.wdAxisSize.value = axis.size;
+  el.yrAxisSize.value = axis.size;
   el.axisSizeVal.value = axis.size;
-  el.wdAxisSizeVal.value = axis.size;
+  el.yrAxisSizeVal.value = axis.size;
   el.axisBold.checked = axis.bold;
-  el.wdBold.checked = axis.bold;
+  el.yrBold.checked = axis.bold;
   el.axisColor.value = axis.color;
-  el.wdColor.value = axis.color;
+  el.yrAxisColor.value = axis.color;
   el.axisYLabel.checked = axis.yLabel;
-  el.wdYLabel.checked = axis.yLabel;
+  el.yrYLabel.checked = axis.yLabel;
+}
+
+/* Play/Restart/Duration/Export van één grafiek. */
+function bindAnimControls(anim) {
+  const ui = anim.ui;
+  ui.playBtn.addEventListener("click", () => {
+    if (anyRecording() || !state.ready) return;
+    anim.playing = !anim.playing;
+    anim.lastTs = 0;
+    setPlayUI(anim);
+  });
+  ui.restartBtn.addEventListener("click", () => {
+    if (anyRecording() || !state.ready) return;
+    anim.elapsed = 0;
+    anim.p = 0;
+    if (!anim.playing) anim.draw(0);
+    setPlayUI(anim);
+  });
+  ui.durSlider.addEventListener("input", () => {
+    if (anyRecording()) return;
+    anim.durMs = +ui.durSlider.value * 1000;
+    ui.durVal.value = ui.durSlider.value;
+    if (!anim.playing) anim.draw(anim.p);
+  });
+  ui.exportBtn.addEventListener("click", () => {
+    if (anim.recording) stopExport(anim, true);  // knop = annuleren tijdens opname
+    else startExport(anim);
+  });
 }
 
 function bindControls() {
-  el.playBtn.addEventListener("click", () => {
-    if (state.recording || !state.ready) return;
-    state.playing = !state.playing;
-    state.lastTs = 0;
-    setPlayUI();
-  });
-  el.restartBtn.addEventListener("click", () => {
-    if (state.recording || !state.ready) return;
-    state.elapsed = 0;
-    state.pauseP = 0;
-    if (!state.playing) drawTimeline(0);
-    setPlayUI();
-  });
-  el.durSlider.addEventListener("input", () => {
-    if (state.recording) return;
-    state.durMs = +el.durSlider.value * 1000;
-    el.durVal.value = el.durSlider.value;
-    if (!state.playing) drawTimeline(state.pauseP);
-  });
   el.lineColor.addEventListener("input", () => {
-    if (state.recording) return;
+    if (anyRecording()) return;
     chartColors.timeline.line = el.lineColor.value;
     redrawCharts();
   });
   el.accentColor.addEventListener("input", () => {
-    if (state.recording) return;
+    if (anyRecording()) return;
     chartColors.timeline.accent = el.accentColor.value;
     redrawCharts();
   });
-  el.weekdayColor.addEventListener("input", () => {
-    if (state.recording) return;
-    chartColors.weekday.color = el.weekdayColor.value;
-    drawWeekday();
+  el.yearlyColor.addEventListener("input", () => {
+    if (anyRecording()) return;
+    chartColors.yearly.color = el.yearlyColor.value;
+    anims.yearly.draw(anims.yearly.p);
   });
   bindAxisGroup({
     size: el.axisSize, sizeVal: el.axisSizeVal,
     bold: el.axisBold, color: el.axisColor, ylabel: el.axisYLabel,
   });
   bindAxisGroup({
-    size: el.wdAxisSize, sizeVal: el.wdAxisSizeVal,
-    bold: el.wdBold, color: el.wdColor, ylabel: el.wdYLabel,
+    size: el.yrAxisSize, sizeVal: el.yrAxisSizeVal,
+    bold: el.yrBold, color: el.yrAxisColor, ylabel: el.yrYLabel,
   });
   syncAxisUI();
-  el.exportBtn.addEventListener("click", () => {
-    if (state.recording) stopExport(true); // knop = annuleren tijdens opname
-    else startExport();
-  });
+  for (const anim of Object.values(anims)) bindAnimControls(anim);
 }
 
 function setControlsDisabled(disabled) {
-  el.playBtn.disabled = disabled;
-  el.restartBtn.disabled = disabled;
-  el.durSlider.disabled = disabled;
   el.lineColor.disabled = disabled;
   el.accentColor.disabled = disabled;
-  el.weekdayColor.disabled = disabled;
+  el.yearlyColor.disabled = disabled;
   el.axisSize.disabled = disabled;
   el.axisBold.disabled = disabled;
   el.axisColor.disabled = disabled;
   el.axisYLabel.disabled = disabled;
-  el.wdAxisSize.disabled = disabled;
-  el.wdBold.disabled = disabled;
-  el.wdColor.disabled = disabled;
-  el.wdYLabel.disabled = disabled;
+  el.yrAxisSize.disabled = disabled;
+  el.yrBold.disabled = disabled;
+  el.yrAxisColor.disabled = disabled;
+  el.yrYLabel.disabled = disabled;
+  for (const anim of Object.values(anims)) {
+    const ui = anim.ui;
+    ui.durSlider.disabled = disabled;
+    ui.exportBtn.disabled = disabled;
+    // De Stop-knop van de opnemende grafiek moet juist WEL klikbaar blijven.
+    ui.playBtn.disabled = disabled;
+    ui.restartBtn.disabled = disabled;
+  }
+  if (disabled) {
+    for (const anim of Object.values(anims)) {
+      if (anim.recording) anim.ui.exportBtn.disabled = false;
+    }
+  }
 }
 
 /* =====================================================================
@@ -778,96 +969,97 @@ function pickMime() {
   return "";
 }
 
-function startExport() {
-  if (state.recording || !state.ready) return;
-  const cv = el.timeline;
+function startExport(anim) {
+  if (anyRecording() || !state.ready) return;
+  const ui = anim.ui;
   let stream;
-  try { stream = cv.captureStream(60); }
+  try { stream = anim.canvas.captureStream(60); }
   catch (e) {
-    el.exportStatus.textContent = "❌ captureStream is not supported in this browser.";
-    el.exportStatus.hidden = false;
+    ui.exportStatus.textContent = "❌ captureStream is not supported in this browser.";
+    ui.exportStatus.hidden = false;
     return;
   }
   const mime = pickMime();
   if (!mime) {
-    el.exportStatus.textContent = "❌ MediaRecorder is not supported in this browser.";
-    el.exportStatus.hidden = false;
+    ui.exportStatus.textContent = "❌ MediaRecorder is not supported in this browser.";
+    ui.exportStatus.hidden = false;
     return;
   }
 
-  state.recording = true;
-  state.cancelExport = false;
-  state.playing = true;      // zorg dat de animatie draait tijdens opname
-  state.elapsed = 0;
-  state.lastTs = 0;
-  state.chunks = [];
-  setPlayUI();
+  anim.recording = true;
+  anim.cancelExport = false;
+  anim.playing = true;      // zorg dat de animatie draait tijdens opname
+  anim.elapsed = 0;
+  anim.lastTs = 0;
+  anim.chunks = [];
+  setPlayUI(anim);
 
   try {
-    state.mediaRec = new MediaRecorder(stream, {
+    anim.mediaRec = new MediaRecorder(stream, {
       mimeType: mime,
       videoBitsPerSecond: 12_000_000,
     });
   } catch (e) {
-    state.mediaRec = new MediaRecorder(stream);
+    anim.mediaRec = new MediaRecorder(stream);
   }
-  const rec = state.mediaRec;
+  const rec = anim.mediaRec;
   rec.ondataavailable = (ev) => {
-    if (ev.data && ev.data.size) state.chunks.push(ev.data);
+    if (ev.data && ev.data.size) anim.chunks.push(ev.data);
   };
-  rec.onstop = finalizeExport;
+  rec.onstop = () => finalizeExport(anim);
 
-  // UI: opname-modus
-  el.recBadge.hidden = false;
-  el.exportBtn.textContent = "■ Stop (cancel MP4)";
-  el.exportBtn.classList.add("recording");
-  el.exportStatus.hidden = false;
-  el.exportStatus.textContent =
-    `⏺ Recording… one full cycle (${el.durSlider.value} s) — keep this tab visible.`;
+  // UI: opname-modus (alle andere bediening op de pagina op slot)
+  ui.recBadge.hidden = false;
+  ui.exportBtn.textContent = "■ Stop (cancel MP4)";
+  ui.exportBtn.classList.add("recording");
+  ui.exportStatus.hidden = false;
+  ui.exportStatus.textContent =
+    `⏺ Recording… one full cycle (${ui.durSlider.value} s) — keep this tab visible.`;
   setControlsDisabled(true);
 
   rec.start(250);
-  state.exportTimer = setTimeout(() => stopExport(false), state.durMs + 500);
+  anim.exportTimer = setTimeout(() => stopExport(anim, false), anim.durMs + 500);
 }
 
-function stopExport(abort) {
-  if (!state.recording) return;
-  state.cancelExport = abort;
-  clearTimeout(state.exportTimer);
-  state.exportTimer = null;
-  if (state.mediaRec && state.mediaRec.state !== "inactive") {
-    try { state.mediaRec.stop(); } catch (e) { /* negeren */ }
+function stopExport(anim, abort) {
+  if (!anim.recording) return;
+  anim.cancelExport = abort;
+  clearTimeout(anim.exportTimer);
+  anim.exportTimer = null;
+  if (anim.mediaRec && anim.mediaRec.state !== "inactive") {
+    try { anim.mediaRec.stop(); } catch (e) { /* negeren */ }
   }
   // finalizeExport wordt via rec.onstop aangeroepen.
 }
 
-function finalizeExport() {
-  const wasCancelled = state.cancelExport;
-  const type = (state.mediaRec && state.mediaRec.mimeType) || "video/mp4";
+function finalizeExport(anim) {
+  const ui = anim.ui;
+  const wasCancelled = anim.cancelExport;
+  const type = (anim.mediaRec && anim.mediaRec.mimeType) || "video/mp4";
 
-  state.recording = false;
-  state.cancelExport = false;
-  state.playing = false;
-  state.mediaRec = null;
-  state.lastTs = 0;
+  anim.recording = false;
+  anim.cancelExport = false;
+  anim.playing = false;
+  anim.mediaRec = null;
+  anim.lastTs = 0;
 
   // UI terugzetten
-  el.recBadge.hidden = true;
-  el.exportBtn.textContent = "⬇ Export MP4";
-  el.exportBtn.classList.remove("recording");
+  ui.recBadge.hidden = true;
+  ui.exportBtn.textContent = "⬇ Export MP4";
+  ui.exportBtn.classList.remove("recording");
   setControlsDisabled(false);
-  setPlayUI();
+  setPlayUI(anim);
 
   if (wasCancelled) {
-    el.exportStatus.textContent = "Export cancelled.";
-    state.chunks = [];
+    ui.exportStatus.textContent = "Export cancelled.";
+    anim.chunks = [];
     return;
   }
 
-  const blob = new Blob(state.chunks, { type });
-  state.chunks = [];
+  const blob = new Blob(anim.chunks, { type });
+  anim.chunks = [];
   const ext = type.indexOf("mp4") >= 0 ? "mp4" : "webm";
-  const name = "steam_games_released_timeline." + ext;
+  const name = anim.fileBase + "." + ext;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -876,7 +1068,7 @@ function finalizeExport() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  el.exportStatus.textContent = `✅ Downloaded: ${name} (${fmtInt(Math.round(blob.size / 1024))} kB).`;
+  ui.exportStatus.textContent = `✅ Downloaded: ${name} (${fmtInt(Math.round(blob.size / 1024))} kB).`;
 }
 
 /* =====================================================================

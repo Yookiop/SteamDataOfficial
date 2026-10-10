@@ -71,37 +71,58 @@
       restarting; the MP4 export records one full cycle (keep this tab visible while recording).</p>
   </section>
 
-  <!-- ===================== Weekday (static) ===================== -->
+  <!-- ===================== Per year (animated) ===================== -->
   <section class="card">
+    <div class="card-head">
+      <h2>Games released per year</h2>
+      <span id="yrRecBadge" class="badge" hidden>⏺ Recording…</span>
+    </div>
+
     <div class="controls">
+      <button id="yrPlayBtn" class="btn" title="Play / pause">▶ Play</button>
+      <button id="yrRestartBtn" class="btn" title="Restart from the beginning">⟲ Restart</button>
+
+      <label class="dur" for="yrDurSlider">Duration
+        <input type="range" id="yrDurSlider" min="10" max="120" step="5" value="30">
+        <output id="yrDurVal" for="yrDurSlider">30</output> s
+      </label>
+
       <span class="colors">
-        <label class="color" for="weekdayColor">Color
-          <input type="color" id="weekdayColor" value="#66c0f4" title="Color of the bars of this chart">
+        <label class="color" for="yearlyColor">Color
+          <input type="color" id="yearlyColor" value="#66c0f4" title="Color of the bars of this chart">
         </label>
       </span>
 
       <span class="axisgroup" title="X/Y axis values of this chart (shared with the other charts)">
-        <label class="as-size" for="wdAxisSize">Axis
-          <input type="range" id="wdAxisSize" min="10" max="44" step="1" value="20">
-          <output id="wdAxisSizeVal" for="wdAxisSize">20</output>
+        <label class="as-size" for="yrAxisSize">Axis
+          <input type="range" id="yrAxisSize" min="10" max="44" step="1" value="20">
+          <output id="yrAxisSizeVal" for="yrAxisSize">20</output>
         </label>
-        <label class="tick" for="wdBold">Bold
-          <input type="checkbox" id="wdBold" title="Axis values in bold">
+        <label class="tick" for="yrBold">Bold
+          <input type="checkbox" id="yrBold" title="Axis values in bold">
         </label>
-        <label class="color" for="wdAxisColor">Color
-          <input type="color" id="wdAxisColor" value="#ffffff" title="Color of the axis values">
+        <label class="color" for="yrAxisColor">Color
+          <input type="color" id="yrAxisColor" value="#ffffff" title="Color of the axis values">
         </label>
-        <label class="tick" for="wdYLabel" title="Show the y-axis label (Amount)">Y label
-          <input type="checkbox" id="wdYLabel" checked>
+        <label class="tick" for="yrYLabel" title="Show the y-axis label (Amount)">Y label
+          <input type="checkbox" id="yrYLabel" checked>
         </label>
       </span>
+
+      <button id="yrExportBtn" class="btn primary" title="Record one full cycle of the animation and download it as MP4">
+        ⬇ Export MP4
+      </button>
+      <span id="yrExportStatus" class="status" hidden></span>
     </div>
 
     <div class="canvas-wrap">
-      <canvas id="weekdayCanvas" width="1200" height="620"></canvas>
+      <canvas id="yearlyCanvas" width="1600" height="900"></canvas>
     </div>
 
-    <p class="foot" id="weekdayFoot">Loading…</p>
+    <p class="foot" id="yearlyFoot">Loading…</p>
+    <p class="hint">The animation builds the columns year by year while the y-axis zooms along,
+      then holds the end frame for 10 s before restarting; the MP4 export records one full cycle
+      (keep this tab visible while recording).</p>
   </section>
 
 </main>
